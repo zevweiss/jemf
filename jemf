@@ -65,6 +65,9 @@ def fsobjtype(obj):
 	else:
 		return UNKNOWN
 
+def pretty_json_dump(d):
+	return json.dumps(d, sort_keys=True, indent=4, separators=(',', ': ')) + '\n'
+
 def run_gpg(args, passwd, stdin_data=None):
 	pw_r, pw_w = pipe()
 	pw_w = os.fdopen(pw_w, "w")
@@ -98,7 +101,7 @@ def load_jemf_fs(filename, passwd):
 def store_jemf_fs(fsd, filename, passwd):
 	fsd["metadata"]["last_modification_time"] = time.time()
 	fsd["metadata"]["last_modification_host"] = socket.gethostbyaddr(socket.gethostname())[0]
-	jfs = json.dumps(fsd)
+	jfs = pretty_json_dump(fsd)
 	# TODO: output to temp file, rename over existing?
 	output = run_gpg(["-c", "--yes", "-o", filename], passwd, jfs)
 	if output != "":
@@ -299,7 +302,7 @@ def dump(args, fsd, unused_passwd):
 		d = fsd["metadata"]
 	else:
 		d = fsd
-	sys.stdout.write(json.dumps(d, sort_keys=True, indent=4) + '\n')
+	sys.stdout.write(pretty_json_dump(d))
 
 if __name__ == "__main__":
 	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem",
