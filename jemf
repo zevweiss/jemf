@@ -201,7 +201,7 @@ def ls(args, fsd, unused_passwd):
 		raise MistypedObject(args.path, obj)
 
 def dump(args, fsd, unused_passwd):
-	sys.stdout.write(str(fsd) + '\n')
+	sys.stdout.write(json.dumps(fsd, sort_keys=True, indent=4) + '\n')
 
 if __name__ == "__main__":
 	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem")
