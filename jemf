@@ -246,14 +246,17 @@ if __name__ == "__main__":
 
 	find_parser = subparsers.add_parser("find", help="recursively list files and directories")
 	find_parser.set_defaults(action=find)
-	find_parser.add_argument("path", metavar="PATH", nargs='?')
 
 	ls_parser = subparsers.add_parser("ls", help="list files and directories")
 	ls_parser.set_defaults(action=ls)
-	ls_parser.add_argument("path", metavar="PATH", nargs='?')
 
+	# Commands that require a path
 	for p in [mkdir_parser, cat_parser, create_parser, edit_parser, rm_parser]:
 		p.add_argument("path", metavar="PATH")
+
+	# Commands that take an optional path
+	for p in [find_parser, ls_parser]:
+		p.add_argument("path", metavar="PATH", nargs='?')
 
 	dump_parser = subparsers.add_parser("dump", help="dump plaintext JSON")
 	dump_parser.set_defaults(action=dump)
