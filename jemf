@@ -17,6 +17,12 @@ import os.path
 default_fspaths = [os.path.expanduser(p) for p in ["~/.config/jemf", "~/.jemf"]]
 gpgcmd = "gpg"
 
+# compat
+if hasattr(os, "pipe2"):
+	pipe = lambda: os.pipe2(0)
+else:
+	pipe = os.pipe
+
 class CorruptFS(Exception):
 	pass
 
@@ -57,13 +63,13 @@ def fsobjtype(obj):
 		return UNKNOWN
 
 def run_gpg(args, passwd, stdin_data=None):
-	pw_r, pw_w = os.pipe()
+	pw_r, pw_w = pipe()
 	pw_w = os.fdopen(pw_w, "w")
 	cmdargs = [gpgcmd, "--quiet", "--batch", "--passphrase-fd", str(pw_r)] + args
 
 	# close write end of passphrase pipe in child process
 	proc = subprocess.Popen(cmdargs, stdout=subprocess.PIPE, stdin=subprocess.PIPE,
-				preexec_fn=lambda: pw_w.close())
+				close_fds=False, preexec_fn=lambda: pw_w.close())
 
 	# parent doesn't use read end
 	os.close(pw_r)
@@ -83,7 +89,8 @@ def run_gpg(args, passwd, stdin_data=None):
 	return stdout_data
 
 def load_jemf_fs(filename, passwd):
-	return json.loads(run_gpg(["-d", "--no-mdc-warning", filename], passwd))
+	s = run_gpg(["-d", "--no-mdc-warning", filename], passwd)
+	return json.loads(s.decode("utf-8"))
 
 def store_jemf_fs(fsd, filename, passwd):
 	jfs = json.dumps(fsd)
