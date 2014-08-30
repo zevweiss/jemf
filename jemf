@@ -37,11 +37,11 @@ def error(msg):
 	sys.stderr.write("Error: %s\n" % msg)
 	exit(1)
 
-def confirmed_getpass(purpose):
-	pass1 = getpass.getpass("Enter password for %s: " % purpose)
-	pass2 = getpass.getpass("Confirm password: ")
+def confirmed_getpass(label):
+	pass1 = getpass.getpass("Enter %s: " % label)
+	pass2 = getpass.getpass("Confirm %s: " % label)
 	if pass1 != pass2:
-		error("passwords do not match")
+		error("input mismatch")
 	else:
 		return pass1
 
@@ -141,7 +141,7 @@ def lookup_for_edit(fsd, path, should_exist):
 def mkfs(args, unused_fsd, unused_passwd):
 	if os.path.exists(args.fsfile) and not args.force:
 		error("%s exists (use -f to force reinitialization)" % args.fsfile)
-	passwd = confirmed_getpass("new jemf FS (%s)" % args.fsfile)
+	passwd = confirmed_getpass("password for new jemf FS (%s)" % args.fsfile)
 	store_jemf_fs({}, args.fsfile, passwd)
 
 def mkdir(args, fsd, passwd):
