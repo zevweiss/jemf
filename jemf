@@ -161,6 +161,19 @@ def edit(args, fsd, passwd):
 	parent[tgtname] = confirmed_getpass("new data for %s" % args.path)
 	store_jemf_fs(fsd, args.fsfile, passwd)
 
+def rm(args, fsd, passwd):
+	parent, tgtname = lookup_for_edit(fsd, args.path, should_exist=True)
+	if args.recursive:
+		del parent[tgtname]
+	else:
+		obj = parent[tgtname]
+		if fsobjtype(obj) == DIRECTORY and len(obj) > 0:
+			error("'%s' is not empty" % args.path)
+		else:
+			del parent[tgtname]
+
+	store_jemf_fs(fsd, args.fsfile, passwd)
+
 def cat(args, fsd, unused_passwd):
 	item = lookup_path(fsd, args.path)
 	t = fsobjtype(item)
@@ -226,6 +239,11 @@ if __name__ == "__main__":
 	edit_parser = subparsers.add_parser("edit", help="edit an existing file")
 	edit_parser.set_defaults(action=edit)
 
+	rm_parser = subparsers.add_parser("rm", help="delete a file or directory")
+	rm_parser.set_defaults(action=rm)
+	rm_parser.add_argument("-r", "--recursive", action="store_true",
+			       help="delete directories recursively")
+
 	find_parser = subparsers.add_parser("find", help="recursively list files and directories")
 	find_parser.set_defaults(action=find)
 	find_parser.add_argument("path", metavar="PATH", nargs='?')
@@ -234,7 +252,7 @@ if __name__ == "__main__":
 	ls_parser.set_defaults(action=ls)
 	ls_parser.add_argument("path", metavar="PATH", nargs='?')
 
-	for p in [mkdir_parser, cat_parser, create_parser, edit_parser]:
+	for p in [mkdir_parser, cat_parser, create_parser, edit_parser, rm_parser]:
 		p.add_argument("path", metavar="PATH")
 
 	dump_parser = subparsers.add_parser("dump", help="dump plaintext JSON")
