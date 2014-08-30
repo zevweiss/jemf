@@ -85,7 +85,7 @@ def run_gpg(args, passwd, stdin_data=None):
 
 	retval = proc.wait()
 	if retval != 0:
-		raise subprocess.CalledProcessError(retval, args)
+		raise subprocess.CalledProcessError(retval, cmdargs)
 
 	return stdout_data
 
@@ -357,5 +357,6 @@ if __name__ == "__main__":
 		args.action(args, fsd, passwd)
 
 	except subprocess.CalledProcessError as cpe:
-		sys.stderr.write("%s exited with status %d\n" % (gpgcmd, cpe.returncode))
+		cmdname = cpe.cmd[0] if type(cpe.cmd) is list else cpe.cmd.split()[0]
+		sys.stderr.write("%s exited with status %d\n" % (cmdname, cpe.returncode))
 		exit(1)
