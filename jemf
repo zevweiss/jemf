@@ -156,6 +156,8 @@ V=0 means the character type will be omitted.
 The default constraint is %s, specifying a twelve-character
 entry with at least two capital letters, at least two lower-case
 letters, at least two digits, and at least two punctuation characters.
+The user-provided constraint list (which may be empty) can selectively
+override these constraints.
 
 Stupid-site example: L8:C2:m2:N2:P0 for an 8-character purely
 alphanumeric (but mixed-case) entry.""" % default_constraints
@@ -334,9 +336,8 @@ if __name__ == "__main__":
 
 	# Commands that allow automatic data generation
 	for p in [create_parser, edit_parser]:
-		p.add_argument("-g", "--generate", metavar="CONSTRAINTS", nargs='?',
-			       help="auto-generate random entry data",
-			       type=str, default=default_constraints)
+		p.add_argument("-g", "--generate", metavar="CONSTRAINTS",
+			       help="auto-generate random entry data", type=str)
 
 	args = mainparser.parse_args()
 
