@@ -291,7 +291,9 @@ def dump(args, fsd, unused_passwd):
 	sys.stdout.write(json.dumps(fsd, sort_keys=True, indent=4) + '\n')
 
 if __name__ == "__main__":
-	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem")
+	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem",
+					     epilog="FS file can also be specified with the environment"
+					     " variable JEMF_FSFILE")
 
 	mainparser.add_argument("-f", "--fsfile", type=str, help="jemf FS file to use")
 
@@ -342,6 +344,9 @@ if __name__ == "__main__":
 	args = mainparser.parse_args()
 
 	if args.fsfile is None:
+		args.fsfile = os.getenv("JEMF_FSFILE")
+
+	if args.fsfile is None or args.fsfile == "":
 		args.fsfile = find_fs()
 
 	if args.fsfile is None:
