@@ -13,6 +13,7 @@ import subprocess
 import json
 import os
 import os.path
+import random
 
 default_fspaths = [os.path.expanduser(p) for p in ["~/.config/jemf", "~/.jemf"]]
 gpgcmd = "gpg"
@@ -138,6 +139,70 @@ def lookup_for_edit(fsd, path, should_exist):
 		error("'%s' does not exist" % path)
 	return (parent, tgtcomp)
 
+default_constraints = "L12:C2:m2:N2:P2"
+
+gen_constraints_desc = """
+CONSTRAINTS is a colon-separated list of data constraints of the form TV.
+
+T is a type indicator: L for length, C for capital letters, m for
+lower-case letters, N for numerals (digits), and P for punctuation
+characters.
+
+V is the numeric value of of the constraint: for L (length) this
+specifies the length of the generated data; for all others it provides
+a minimum number of characters of that type, though as a special case
+V=0 means the character type will be omitted.
+
+The default constraint is %s, specifying a twelve-character
+entry with at least two capital letters, at least two lower-case
+letters, at least two digits, and at least two punctuation characters.
+
+Stupid-site example: L8:C2:m2:N2:P0 for an 8-character purely
+alphanumeric (but mixed-case) entry.""" % default_constraints
+
+def constraints_to_dict(cstr):
+	d = {}
+	for c in cstr.split(":"):
+		if c != "":
+			d[c[0]] = int(c[1:])
+	return d
+
+uppers = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+lowers = "abcdefghijklmnopqrstuvwxyz"
+digits = "0123456789"
+punctuation = "!@#$%^&*:._-=+"
+
+def generate_data(constraints):
+	cdict = constraints_to_dict(default_constraints)
+	cdict.update(constraints_to_dict(constraints))
+	s = ""
+	for _ in xrange(0, cdict['C']):
+		s += random.choice(uppers)
+	for _ in xrange(0, cdict['m']):
+		s += random.choice(lowers)
+	for _ in xrange(0, cdict['N']):
+		s += random.choice(digits)
+	for _ in xrange(0, cdict['P']):
+		s += random.choice(punctuation)
+
+	padchars = ""
+	if cdict['C'] > 0:
+		padchars += uppers
+	if cdict['m'] > 0:
+		padchars += lowers
+	if cdict['N'] > 0:
+		padchars += digits
+	if cdict['P'] > 0:
+		padchars += punctuation
+
+	# fill remaining space from pad character sets
+	for _ in xrange(0, cdict['L']-len(s)):
+		s += random.choice(padchars)
+
+	l = list(s)
+	random.shuffle(l)
+	return ''.join(l)
+
 def mkfs(args, unused_fsd, unused_passwd):
 	if os.path.exists(args.fsfile) and not args.force:
 		error("%s exists (use -f to force reinitialization)" % args.fsfile)
@@ -151,14 +216,21 @@ def mkdir(args, fsd, passwd):
 
 def create(args, fsd, passwd):
 	parent, newname = lookup_for_edit(fsd, args.path, should_exist=False)
-	parent[newname] = confirmed_getpass("data for %s" % args.path)
+	if args.generate is None:
+		parent[newname] = confirmed_getpass("data for %s" % args.path)
+	else:
+		parent[newname] = generate_data(args.generate)
 	store_jemf_fs(fsd, args.fsfile, passwd)
 
 def edit(args, fsd, passwd):
 	parent, tgtname = lookup_for_edit(fsd, args.path, should_exist=True)
 	if fsobjtype(parent[tgtname]) != FILE:
 		error("'%s' is not a file" % args.path)
-	parent[tgtname] = confirmed_getpass("new data for %s" % args.path)
+
+	if args.generate is None:
+		parent[tgtname] = confirmed_getpass("new data for %s" % args.path)
+	else:
+		parent[tgtname] = generate_data(args.generate)
 	store_jemf_fs(fsd, args.fsfile, passwd)
 
 def rm(args, fsd, passwd):
@@ -233,10 +305,14 @@ if __name__ == "__main__":
 	cat_parser = subparsers.add_parser("cat", help="print a file to stdout")
 	cat_parser.set_defaults(action=cat)
 
-	create_parser = subparsers.add_parser("create", help="create a new file")
+	create_parser = subparsers.add_parser("create", help="create a new file",
+					      epilog=gen_constraints_desc,
+					      formatter_class=argparse.RawDescriptionHelpFormatter)
 	create_parser.set_defaults(action=create)
 
-	edit_parser = subparsers.add_parser("edit", help="edit an existing file")
+	edit_parser = subparsers.add_parser("edit", help="edit an existing file",
+					    epilog=gen_constraints_desc,
+					    formatter_class=argparse.RawDescriptionHelpFormatter)
 	edit_parser.set_defaults(action=edit)
 
 	rm_parser = subparsers.add_parser("rm", help="delete a file or directory")
@@ -257,6 +333,12 @@ if __name__ == "__main__":
 	# Commands that take an optional path
 	for p in [find_parser, ls_parser]:
 		p.add_argument("path", metavar="PATH", nargs='?')
+
+	# Commands that allow automatic data generation
+	for p in [create_parser, edit_parser]:
+		p.add_argument("-g", "--generate", metavar="CONSTRAINTS", nargs='?',
+			       help="auto-generate random entry data",
+			       type=str, default=default_constraints)
 
 	dump_parser = subparsers.add_parser("dump", help="dump plaintext JSON")
 	dump_parser.set_defaults(action=dump)
