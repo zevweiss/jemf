@@ -1,0 +1,256 @@
+#!/usr/bin/python
+
+# jemf: a jeneric (?), encrypted mini-filesystem
+#
+# (a command-line password manager).
+#
+# Stores data in a gpg-encrypted JSON file.
+
+import sys
+import argparse
+import getpass
+import subprocess
+import json
+import os
+import os.path
+
+default_fspaths = [os.path.expanduser(p) for p in ["~/.config/jemf", "~/.jemf"]]
+gpgcmd = "gpg"
+
+class CorruptFS(Exception):
+	pass
+
+class MistypedObject(CorruptFS):
+	def __init__(self, path, obj):
+		msg = "Mistyped object '%s': %s" % (path, str(type(obj)))
+		super(MistypedObject, self).__init__(msg)
+		self.wrongtype = type(obj)
+		self.path = path
+
+def error(msg):
+	sys.stderr.write("Error: %s\n" % msg)
+	exit(1)
+
+def confirmed_getpass(purpose):
+	pass1 = getpass.getpass("Enter password for %s: " % purpose)
+	pass2 = getpass.getpass("Confirm password: ")
+	if pass1 != pass2:
+		error("passwords do not match")
+	else:
+		return pass1
+
+def find_fs():
+	for p in default_fspaths:
+		if os.path.exists(p):
+			return p
+	return None
+
+UNKNOWN = 0
+FILE = 1
+DIRECTORY = 2
+def fsobjtype(obj):
+	if type(obj) == dict:
+		return DIRECTORY
+	elif type(obj) == str or type(obj) == unicode:
+		return FILE
+	else:
+		return UNKNOWN
+
+def run_gpg(args, passwd, stdin_data=None):
+	pw_r, pw_w = os.pipe()
+	pw_w = os.fdopen(pw_w, "w")
+	cmdargs = [gpgcmd, "--quiet", "--batch", "--passphrase-fd", str(pw_r)] + args
+
+	# close write end of passphrase pipe in child process
+	proc = subprocess.Popen(cmdargs, stdout=subprocess.PIPE, stdin=subprocess.PIPE,
+				preexec_fn=lambda: pw_w.close())
+
+	# parent doesn't use read end
+	os.close(pw_r)
+
+	# send passphrase to gpg child
+	pw_w.write(passwd)
+	# probably redundant, since we're just about to close it, but why not...
+	pw_w.flush()
+	pw_w.close()
+
+	stdout_data, _ = proc.communicate(stdin_data)
+
+	retval = proc.wait()
+	if retval != 0:
+		raise subprocess.CalledProcessError(retval, args)
+
+	return stdout_data
+
+def load_jemf_fs(filename, passwd):
+	return json.loads(run_gpg(["-d", "--no-mdc-warning", filename], passwd))
+
+def store_jemf_fs(fsd, filename, passwd):
+	jfs = json.dumps(fsd)
+	# TODO: output to temp file, rename over existing?
+	output = run_gpg(["-c", "--yes", "-o", filename], passwd, jfs)
+	if output != "":
+		error("Unexpected output from gpg: %s\n" % output)
+
+def open_jemf_fs(path):
+	passwd = getpass.getpass("Enter password for %s: " % path)
+	return load_jemf_fs(path, passwd), passwd
+
+def path_components(path):
+	np = os.path.normpath(path)
+	while len(np) > 0 and np[0] == os.sep:
+		np = np[1:]
+	return np.split(os.sep) if len(np) > 0 else []
+
+def lookup_comps(fsd, comps):
+	fsdir = fsd
+	trail = os.sep
+	for c in comps:
+		try:
+			fsdir = fsdir[c]
+		except KeyError:
+			error("'%s' does not exist in '%s'" % (c, trail))
+		trail = os.path.join(trail, c)
+	return fsdir
+
+def lookup_path(fsd, path):
+	return lookup_comps(fsd, path_components(path))
+
+def lookup_for_edit(fsd, path, should_exist):
+	"""Lookup the parent of 'path' in 'fsd', returning a tuple of it and
+	the last component of 'path'."""
+	comps = path_components(path)
+	parentcomps = comps[:-1]
+	tgtcomp = comps[-1]
+	parent = lookup_comps(fsd, parentcomps)
+	if fsobjtype(parent) != DIRECTORY:
+		error("'%s' is not a directory")
+	elif not should_exist and tgtcomp in parent:
+		error("'%s' already exists" % path)
+	elif should_exist and tgtcomp not in parent:
+		error("'%s' does not exist" % path)
+	return (parent, tgtcomp)
+
+def mkfs(args, unused_fsd, unused_passwd):
+	if os.path.exists(args.fsfile) and not args.force:
+		error("%s exists (use -f to force reinitialization)" % args.fsfile)
+	passwd = confirmed_getpass("new jemf FS (%s)" % args.fsfile)
+	store_jemf_fs({}, args.fsfile, passwd)
+
+def mkdir(args, fsd, passwd):
+	parent, newname = lookup_for_edit(fsd, args.path, should_exist=False)
+	parent[newname] = {}
+	store_jemf_fs(fsd, args.fsfile, passwd)
+
+def create(args, fsd, passwd):
+	parent, newname = lookup_for_edit(fsd, args.path, should_exist=False)
+	parent[newname] = confirmed_getpass("data for %s" % args.path)
+	store_jemf_fs(fsd, args.fsfile, passwd)
+
+def edit(args, fsd, passwd):
+	parent, tgtname = lookup_for_edit(fsd, args.path, should_exist=True)
+	if fsobjtype(parent[tgtname]) != FILE:
+		error("'%s' is not a file" % args.path)
+	parent[tgtname] = confirmed_getpass("new data for %s" % args.path)
+	store_jemf_fs(fsd, args.fsfile, passwd)
+
+def cat(args, fsd, unused_passwd):
+	item = lookup_path(fsd, args.path)
+	t = fsobjtype(item)
+	if t == DIRECTORY:
+		error("'%s' is a directory" % args.path)
+	elif t != FILE:
+		raise MistypedObject(args.path, item)
+	sys.stdout.write(item + '\n')
+
+def recursive_list(obj, pfx):
+	t = fsobjtype(obj)
+	if t == FILE or t == DIRECTORY:
+		sys.stdout.write("%s\n" % pfx)
+		if t == DIRECTORY:
+			for n, o in obj.items():
+				recursive_list(o, os.path.join(pfx, n))
+	else:
+		raise MistypedObject(pfx, obj)
+
+def find(args, fsd, unused_passwd):
+	if args.path is None:
+		recursive_list(fsd, "/")
+	else:
+		recursive_list(lookup_path(fsd, args.path), args.path)
+
+def ls(args, fsd, unused_passwd):
+	if args.path is not None:
+		obj = lookup_path(fsd, args.path)
+	else:
+		obj = fsd
+
+	if fsobjtype(obj) == FILE:
+		sys.stdout.write(args.path + '\n')
+	elif fsobjtype(obj) == DIRECTORY:
+		for n, o in obj.items():
+			sys.stdout.write("%s%s\n" % (n, "/" if fsobjtype(o) == DIRECTORY else ""))
+	else:
+		raise MistypedObject(args.path, obj)
+
+def dump(args, fsd, unused_passwd):
+	sys.stdout.write(str(fsd) + '\n')
+
+if __name__ == "__main__":
+	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem")
+
+	mainparser.add_argument("-f", "--fsfile", type=str, help="jemf FS file to use")
+
+	subparsers = mainparser.add_subparsers()
+
+	mkfs_parser = subparsers.add_parser("mkfs", help="initialize a jemf FS")
+	mkfs_parser.set_defaults(action=mkfs)
+	mkfs_parser.add_argument("-f", "--force", action="store_true")
+
+	mkdir_parser = subparsers.add_parser("mkdir", help="create a new directory")
+	mkdir_parser.set_defaults(action=mkdir)
+
+	cat_parser = subparsers.add_parser("cat", help="print a file to stdout")
+	cat_parser.set_defaults(action=cat)
+
+	create_parser = subparsers.add_parser("create", help="create a new file")
+	create_parser.set_defaults(action=create)
+
+	edit_parser = subparsers.add_parser("edit", help="edit an existing file")
+	edit_parser.set_defaults(action=edit)
+
+	find_parser = subparsers.add_parser("find", help="recursively list files and directories")
+	find_parser.set_defaults(action=find)
+	find_parser.add_argument("path", metavar="PATH", nargs='?')
+
+	ls_parser = subparsers.add_parser("ls", help="list files and directories")
+	ls_parser.set_defaults(action=ls)
+	ls_parser.add_argument("path", metavar="PATH", nargs='?')
+
+	for p in [mkdir_parser, cat_parser, create_parser, edit_parser]:
+		p.add_argument("path", metavar="PATH")
+
+	dump_parser = subparsers.add_parser("dump", help="dump plaintext JSON")
+	dump_parser.set_defaults(action=dump)
+
+	args = mainparser.parse_args()
+
+	if args.fsfile is None:
+		args.fsfile = find_fs()
+
+	if args.fsfile is None:
+		if args.action != mkfs:
+			error("No jemf FS found or specified")
+		else:
+			args.fsfile = default_fspaths[0]
+
+	try:
+		if args.action != mkfs:
+			fsd, passwd = open_jemf_fs(args.fsfile)
+		else:
+			fsd, passwd = None, None
+		args.action(args, fsd, passwd)
+
+	except subprocess.CalledProcessError as cpe:
+		sys.stderr.write("%s exited with status %d\n" % (gpgcmd, cpe.returncode))
+		exit(1)
