@@ -294,37 +294,35 @@ if __name__ == "__main__":
 	mainparser.add_argument("-f", "--fsfile", type=str, help="jemf FS file to use")
 
 	subparsers = mainparser.add_subparsers()
+	def subcommand(action, *args, **kwargs):
+		parser = subparsers.add_parser(*args, **kwargs)
+		parser.set_defaults(action=action)
+		return parser
 
-	mkfs_parser = subparsers.add_parser("mkfs", help="initialize a jemf FS")
-	mkfs_parser.set_defaults(action=mkfs)
+	mkfs_parser = subcommand(mkfs, "mkfs", help="initialize a jemf FS")
 	mkfs_parser.add_argument("-f", "--force", action="store_true")
 
-	mkdir_parser = subparsers.add_parser("mkdir", help="create a new directory")
-	mkdir_parser.set_defaults(action=mkdir)
+	mkdir_parser = subcommand(mkdir, "mkdir", help="create a new directory")
 
-	cat_parser = subparsers.add_parser("cat", help="print a file to stdout")
-	cat_parser.set_defaults(action=cat)
+	cat_parser = subcommand(cat, "cat", help="print a file to stdout")
 
-	create_parser = subparsers.add_parser("create", help="create a new file",
-					      epilog=gen_constraints_desc,
-					      formatter_class=argparse.RawDescriptionHelpFormatter)
-	create_parser.set_defaults(action=create)
+	create_parser = subcommand(create, "create", help="create a new file",
+				   epilog=gen_constraints_desc,
+				   formatter_class=argparse.RawDescriptionHelpFormatter)
 
-	edit_parser = subparsers.add_parser("edit", help="edit an existing file",
-					    epilog=gen_constraints_desc,
-					    formatter_class=argparse.RawDescriptionHelpFormatter)
-	edit_parser.set_defaults(action=edit)
+	edit_parser = subcommand(edit, "edit", help="edit an existing file",
+				 epilog=gen_constraints_desc,
+				 formatter_class=argparse.RawDescriptionHelpFormatter)
 
-	rm_parser = subparsers.add_parser("rm", help="delete a file or directory")
-	rm_parser.set_defaults(action=rm)
+	rm_parser = subcommand(rm ,"rm", help="delete a file or directory")
 	rm_parser.add_argument("-r", "--recursive", action="store_true",
 			       help="delete directories recursively")
 
-	find_parser = subparsers.add_parser("find", help="recursively list files and directories")
-	find_parser.set_defaults(action=find)
+	find_parser = subcommand(find, "find", help="recursively list files and directories")
 
-	ls_parser = subparsers.add_parser("ls", help="list files and directories")
-	ls_parser.set_defaults(action=ls)
+	ls_parser = subcommand(ls, "ls", help="list files and directories")
+
+	dump_parser = subcommand(dump, "dump", help="dump plaintext JSON")
 
 	# Commands that require a path
 	for p in [mkdir_parser, cat_parser, create_parser, edit_parser, rm_parser]:
@@ -339,9 +337,6 @@ if __name__ == "__main__":
 		p.add_argument("-g", "--generate", metavar="CONSTRAINTS", nargs='?',
 			       help="auto-generate random entry data",
 			       type=str, default=default_constraints)
-
-	dump_parser = subparsers.add_parser("dump", help="dump plaintext JSON")
-	dump_parser.set_defaults(action=dump)
 
 	args = mainparser.parse_args()
 
