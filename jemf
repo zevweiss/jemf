@@ -330,7 +330,7 @@ def ls(args, fsd, unused_passwd):
 	if fsobjtype(obj) == FILE:
 		sys.stdout.write(args.path + '\n')
 	elif fsobjtype(obj) == DIRECTORY:
-		for n, o in obj.items():
+		for n, o in sorted(obj.items()):
 			sys.stdout.write("%s%s\n" % (n, "/" if fsobjtype(o) == DIRECTORY else ""))
 	else:
 		raise MistypedObject(args.path, obj)
