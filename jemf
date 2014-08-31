@@ -370,14 +370,12 @@ def shell(args, fsd, passwd):
 
 		setattr(JemfShell, "do_%s" % sc.name, cmdfun)
 
-	interp = JemfShell( args)#, fsd, passwd,
-			   # [sc for sc in subcommands if sc.name not in ["shell", "mkfs"]])
-	interp.cmdloop()
+	JemfShell(args).cmdloop()
 
 class Subcommand(object):
-	def __init__(self, name, action, desc, cmdargs, *parser_args, **parser_kwargs):
-		self.name = name
+	def __init__(self, action, desc, cmdargs, *parser_args, **parser_kwargs):
 		self.action = action
+		self.name = action.__name__
 		self.desc = desc
 		self.cmdargs = cmdargs
 		self.parser_args = parser_args
@@ -399,33 +397,31 @@ generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
 					   help="auto-generate entry data"))
 
 subcommands = [
-	Subcommand("mkfs", mkfs, "initialize a jemf FS",
+	Subcommand(mkfs, "initialize a jemf FS",
 		   [(("-f", "--force"), dict(help="overwrite an existing file"))]),
-	Subcommand("mkdir", mkdir, "create a new directory",
-		   [mk_path_arg("the directory to create")]),
-	Subcommand("cat", cat, "print a file to stdout",
-		   [mk_path_arg("the file to print")]),
-	Subcommand("create", create, "create a new file",
+	Subcommand(mkdir, "create a new directory", [mk_path_arg("the directory to create")]),
+	Subcommand(cat, "print a file to stdout", [mk_path_arg("the file to print")]),
+	Subcommand(create, "create a new file",
 		   [generate_arg, mk_path_arg("the file to create")],
 		   epilog=gen_constraints_desc,
 		   formatter_class=argparse.RawDescriptionHelpFormatter),
-	Subcommand("edit", edit, "edit an existing file",
+	Subcommand(edit, "edit an existing file",
 		   [generate_arg, mk_path_arg("the file to edit")],
 		   epilog=gen_constraints_desc,
 		   formatter_class=argparse.RawDescriptionHelpFormatter),
-	Subcommand("rm", rm, "delete a file or directory",
+	Subcommand(rm, "delete a file or directory",
 		   [(("-r", "--recursive"), dict(action="store_true")),
 		    mk_path_arg("the file or directory to delete")]),
-	Subcommand("find", find, "recursively list files and directories",
+	Subcommand(find, "recursively list files and directories",
 		   [mk_path_arg("starting directory (default: root)", opt=True)]),
-	Subcommand("ls", ls, "list files and directories",
+	Subcommand(ls, "list files and directories",
 		   [mk_path_arg("file or directory to list (default: root)", opt=True)]),
-	Subcommand("dump", dump, "dump plaintext JSON",
+	Subcommand(dump, "dump plaintext JSON",
 		   [(("-m", "--metadata"), dict(action="store_const", dest="kind",
 						const="metadata", help="dump only metadata")),
 		    (("-d", "--data"), dict(action="store_const", dest="kind",
 					    const="data", help="dump only data"))]),
-	Subcommand("shell", shell, "start an interactive jemf shell", []),
+	Subcommand(shell, "start an interactive jemf shell", []),
 ]
 
 if __name__ == "__main__":
