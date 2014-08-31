@@ -16,6 +16,8 @@ import os.path
 import random
 import socket
 import time
+import cmd
+import shlex
 
 default_fspaths = [os.path.expanduser(p) for p in ["~/.config/jemf", "~/.jemf"]]
 gpgcmd = "gpg"
@@ -25,6 +27,15 @@ if hasattr(os, "pipe2"):
 	pipe = lambda: os.pipe2(0)
 else:
 	pipe = os.pipe
+
+class UserError(Exception):
+	pass
+
+class UsageError(UserError):
+	pass
+
+class InternalError(Exception):
+	pass
 
 class CorruptFS(Exception):
 	pass
@@ -37,8 +48,10 @@ class MistypedObject(CorruptFS):
 		self.path = path
 
 def error(msg):
-	sys.stderr.write("Error: %s\n" % msg)
-	exit(1)
+	raise UserError("Error: %s\n" % msg)
+
+def internal_error(msg):
+	raise InternalError("Internal error: %s\n" % msg)
 
 def confirmed_getpass(label):
 	pass1 = getpass.getpass("Enter %s: " % label)
@@ -304,6 +317,56 @@ def dump(args, fsd, unused_passwd):
 		d = fsd
 	sys.stdout.write(pretty_json_dump(d))
 
+def mk_cmd_handler(orig_args, fsd, passwd, sc):
+	def cmdfun(self, argstr):
+		try:
+			args = sc.parser.parse_args(shlex.split(argstr))
+		except UsageError as ue:
+			if ue.message:
+				sys.stderr.write(ue.message)
+			return
+		# merge in orig_args if not overridden
+		for k,v in orig_args.__dict__.items():
+			if k not in args:
+				setattr(args, k, v)
+		try:
+			sc.action(args, fsd, passwd)
+		except UserError as ue:
+			if ue.message:
+				sys.stderr.write(ue.message)
+	return cmdfun
+
+def argparse_raise_usage_error(self, status=0, message=None):
+	raise UsageError(message)
+
+class JemfShell(cmd.Cmd):
+	def __init__(self, args):
+		self.prompt = "jemf[%s]> " % args.fsfile
+		cmd.Cmd.__init__(self)
+
+	def do_EOF(self, args):
+		sys.stdout.write('\n')
+		return True
+
+	def postcmd(self, stop, line):
+		return stop
+
+	def emptyline(self):
+		return
+
+def shell(args, fsd, passwd):
+	for sc in subcommands:
+		if sc.name in ["shell", "mkfs"]:
+			continue
+		# hack around argparse's inability to report
+		# an error without exiting...
+		sc.parser.exit = argparse_raise_usage_error
+		setattr(JemfShell, "do_%s" % sc.name, mk_cmd_handler(args, fsd, passwd, sc))
+
+	interp = JemfShell( args)#, fsd, passwd,
+			   # [sc for sc in subcommands if sc.name not in ["shell", "mkfs"]])
+	interp.cmdloop()
+
 class Subcommand(object):
 	def __init__(self, name, action, desc, cmdargs, *parser_args, **parser_kwargs):
 		self.name = name
@@ -355,6 +418,7 @@ subcommands = [
 						const="metadata", help="dump only metadata")),
 		    (("-d", "--data"), dict(action="store_const", dest="kind",
 					    const="data", help="dump only data"))]),
+	Subcommand("shell", shell, "start an interactive jemf shell", []),
 ]
 
 if __name__ == "__main__":
@@ -379,7 +443,7 @@ if __name__ == "__main__":
 
 	if args.fsfile is None:
 		if args.action != mkfs:
-			error("No jemf FS found or specified")
+			error("no jemf FS found or specified")
 		else:
 			args.fsfile = default_fspaths[0]
 
@@ -393,4 +457,7 @@ if __name__ == "__main__":
 	except subprocess.CalledProcessError as cpe:
 		cmdname = cpe.cmd[0] if type(cpe.cmd) is list else cpe.cmd.split()[0]
 		sys.stderr.write("%s exited with status %d\n" % (cmdname, cpe.returncode))
+		exit(1)
+	except UserError as ue:
+		sys.stderr.write(ue.message)
 		exit(1)
