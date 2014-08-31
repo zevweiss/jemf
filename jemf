@@ -345,6 +345,7 @@ class JemfShell(cmd.Cmd):
 		cmd.Cmd.__init__(self)
 
 	def do_EOF(self, args):
+		"""EOF (^D): exit shell session."""
 		sys.stdout.write('\n')
 		return True
 
@@ -353,6 +354,10 @@ class JemfShell(cmd.Cmd):
 
 	def emptyline(self):
 		return
+
+	def default(self, line):
+		sys.stderr.write("Unrecognized command: %s\n" % line.split()[0])
+		sys.stderr.write("(see 'help')\n")
 
 def shell(args, fsd, passwd):
 	for sc in subcommands:
