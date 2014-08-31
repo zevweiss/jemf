@@ -444,13 +444,13 @@ if __name__ == "__main__":
 	if args.fsfile is None or args.fsfile == "":
 		args.fsfile = find_fs()
 
-	if args.fsfile is None:
-		if args.action != mkfs:
-			error("no jemf FS found or specified")
-		else:
-			args.fsfile = default_fspaths[0]
-
 	try:
+		if args.fsfile is None:
+			if args.action != mkfs:
+				error("no jemf FS found or specified")
+			else:
+				args.fsfile = default_fspaths[0]
+
 		if args.action != mkfs:
 			fsd, passwd = open_jemf_fs(args.fsfile)
 		else:
