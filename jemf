@@ -22,6 +22,12 @@ import tempfile
 import cmd
 import shlex
 
+try:
+	import readline
+	readline.set_completer_delims(" \t\n" + os.sep)
+except ImportError:
+	pass
+
 default_fspaths = [os.path.expanduser(p) for p in ["~/.config/jemf", "~/.jemf"]]
 gpgcmd = "gpg"
 
