@@ -133,35 +133,42 @@ def path_components(path):
 	np = os.path.normpath(path)
 	while len(np) > 0 and np[0] == os.sep:
 		np = np[1:]
+	np = "" if np == "." else np
 	return np.split(os.sep) if len(np) > 0 else []
 
-def lookup_comps(fsd, comps):
+def lookup_comps(fsd, comps, noexc=False):
 	fsdir = fsd["data"]
 	trail = os.sep
 	for c in comps:
 		try:
 			fsdir = fsdir[c]
 		except KeyError:
-			error("'%s' does not exist in '%s'" % (c, trail))
+			if noexc:
+				return None
+			else:
+				error("'%s' does not exist in '%s'" % (c, trail))
 		trail = os.path.join(trail, c)
 	return fsdir
 
-def lookup_path(fsd, path):
-	return lookup_comps(fsd, path_components(path))
+def lookup_path(fsd, path, noexc=False):
+	return lookup_comps(fsd, path_components(path), noexc=noexc)
 
-def lookup_for_edit(fsd, path, should_exist):
+def lookup_for_edit(fsd, path, should_exist, noexc=False):
 	"""Lookup the parent of 'path' in 'fsd', returning a tuple of it and
 	the last component of 'path'."""
 	comps = path_components(path)
 	parentcomps = comps[:-1]
 	tgtcomp = comps[-1]
-	parent = lookup_comps(fsd, parentcomps)
+	parent = lookup_comps(fsd, parentcomps, noexc=noexc)
 	if fsobjtype(parent) != DIRECTORY:
 		error("'%s' is not a directory" % os.path.join(*parentcomps))
-	elif not should_exist and tgtcomp in parent:
-		error("'%s' already exists" % path)
-	elif should_exist and tgtcomp not in parent:
-		error("'%s' does not exist" % path)
+
+	if should_exist is not None:
+		if not should_exist and tgtcomp in parent:
+			error("'%s' already exists" % path)
+		elif should_exist and tgtcomp not in parent:
+			error("'%s' does not exist" % path)
+
 	return (parent, tgtcomp)
 
 default_constraints = "L12:C2:m2:N2:P2"
@@ -348,8 +355,9 @@ def mk_raise_usage_error(usage):
 	return func
 
 class JemfShell(cmd.Cmd):
-	def __init__(self, args):
+	def __init__(self, args, fsd):
 		self.prompt = "jemf[%s]> " % args.fsfile if sys.stdin.isatty() else ""
+		self.fsd = fsd
 		cmd.Cmd.__init__(self)
 
 	def do_EOF(self, args):
@@ -367,6 +375,33 @@ class JemfShell(cmd.Cmd):
 	def default(self, line):
 		errprint("Unrecognized command: %s" % line.split()[0])
 		errprint("(see 'help')")
+
+	def completedefault(self, orig_text, line, beg, end):
+		try:
+			if shlex.split(line[:end] + ".")[-1] != ".":
+				text = shlex.split(line[:end])[-1]
+			else:
+				text = orig_text
+		except ValueError:
+			text = orig_text
+		ppath, pfx = os.path.split(text)
+
+		pdir = lookup_path(self.fsd, ppath, noexc=True)
+		if pdir is None:
+			return []
+
+		base = orig_text[:-len(pfx)]
+		l = []
+		for name in pdir:
+			if name.startswith(pfx):
+				l.append(base + name)
+
+		if len(l) == 1 and l[0] == orig_text:
+			obj = lookup_path(self.fsd, text)
+			suffix = os.sep if fsobjtype(obj) == DIRECTORY else " "
+			return [orig_text + suffix]
+		else:
+			return l
 
 def shell(args, fsd, passwd):
 	for sc in subcommands:
@@ -386,7 +421,7 @@ def shell(args, fsd, passwd):
 
 		setattr(JemfShell, "do_%s" % sc.name, cmdfun)
 
-	JemfShell(args).cmdloop()
+	JemfShell(args, fsd).cmdloop()
 
 class Subcommand(object):
 	def __init__(self, action, desc, cmdargs, *parser_args, **parser_kwargs):
