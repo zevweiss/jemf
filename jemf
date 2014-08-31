@@ -349,12 +349,13 @@ def mk_raise_usage_error(usage):
 
 class JemfShell(cmd.Cmd):
 	def __init__(self, args):
-		self.prompt = "jemf[%s]> " % args.fsfile
+		self.prompt = "jemf[%s]> " % args.fsfile if sys.stdin.isatty() else ""
 		cmd.Cmd.__init__(self)
 
 	def do_EOF(self, args):
 		"""EOF (^D): exit shell session."""
-		sys.stdout.write('\n')
+		if sys.stdin.isatty():
+			sys.stdout.write('\n')
 		return True
 
 	def postcmd(self, stop, line):
