@@ -18,6 +18,7 @@ import os.path
 import random
 import socket
 import time
+import tempfile
 import cmd
 import shlex
 
@@ -120,10 +121,21 @@ def store_jemf_fs(fsd, filename, passwd):
 	fsd["metadata"]["last_modification_time"] = time.time()
 	fsd["metadata"]["last_modification_host"] = socket.gethostbyaddr(socket.gethostname())[0]
 	jfs = str.encode(pretty_json_dump(fsd), "utf-8")
-	# TODO: output to temp file, rename over existing?
-	output = run_gpg(["-c", "--yes", "-o", filename], passwd, jfs)
+
+	# If filename is a symlink, do the new file write & rename in
+	# the pointed-to directory
+	filename = os.path.realpath(filename)
+
+	tmpfd, tmppath = tempfile.mkstemp(prefix=os.path.basename(filename),
+					  dir=os.path.dirname(filename))
+	os.close(tmpfd)
+
+	output = run_gpg(["-c", "--yes", "-o", tmppath], passwd, jfs)
 	if output != b'':
-		error("Unexpected output from gpg: %s\n" % output)
+		os.unlink(tmppath)
+		internal_error("Unexpected output from gpg: %s\n" % output)
+
+	os.rename(tmppath, filename)
 
 def open_jemf_fs(path):
 	passwd = getpass.getpass("Enter password for %s: " % path)
