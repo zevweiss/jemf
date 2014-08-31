@@ -128,14 +128,17 @@ def store_jemf_fs(fsd, filename, passwd):
 
 	tmpfd, tmppath = tempfile.mkstemp(prefix=os.path.basename(filename),
 					  dir=os.path.dirname(filename))
-	os.close(tmpfd)
 
 	output = run_gpg(["-c", "--yes", "-o", tmppath], passwd, jfs)
 	if output != b'':
 		os.unlink(tmppath)
 		internal_error("Unexpected output from gpg: %s\n" % output)
 
+	os.fsync(tmpfd)
+	os.close(tmpfd)
+
 	os.rename(tmppath, filename)
+	# FIXME: fsync directory? python stdlib doesn't seem to have opendir()...
 
 def open_jemf_fs(path):
 	passwd = getpass.getpass("Enter password for %s: " % path)
