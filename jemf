@@ -304,6 +304,59 @@ def dump(args, fsd, unused_passwd):
 		d = fsd
 	sys.stdout.write(pretty_json_dump(d))
 
+class Subcommand(object):
+	def __init__(self, name, action, desc, cmdargs, *parser_args, **parser_kwargs):
+		self.name = name
+		self.action = action
+		self.desc = desc
+		self.cmdargs = cmdargs
+		self.parser_args = parser_args
+		self.parser_kwargs = parser_kwargs
+
+	def add_to(self, subparsers):
+		self.parser = subparsers.add_parser(self.name, *self.parser_args, **self.parser_kwargs)
+		self.parser.set_defaults(action=self.action)
+		for a in self.cmdargs:
+			self.parser.add_argument(*a[0], **a[1])
+
+def mk_path_arg(desc, opt=False):
+	d = dict(metavar="PATH", help=desc)
+	if opt:
+		d["nargs"] = '?'
+	return (("path",), d)
+
+generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
+					   help="auto-generate entry data"))
+
+subcommands = [
+	Subcommand("mkfs", mkfs, "initialize a jemf FS",
+		   [(("-f", "--force"), dict(help="overwrite an existing file"))]),
+	Subcommand("mkdir", mkdir, "create a new directory",
+		   [mk_path_arg("the directory to create")]),
+	Subcommand("cat", cat, "print a file to stdout",
+		   [mk_path_arg("the file to print")]),
+	Subcommand("create", create, "create a new file",
+		   [generate_arg, mk_path_arg("the file to create")],
+		   epilog=gen_constraints_desc,
+		   formatter_class=argparse.RawDescriptionHelpFormatter),
+	Subcommand("edit", edit, "edit an existing file",
+		   [generate_arg, mk_path_arg("the file to edit")],
+		   epilog=gen_constraints_desc,
+		   formatter_class=argparse.RawDescriptionHelpFormatter),
+	Subcommand("rm", rm, "delete a file or directory",
+		   [(("-r", "--recursive"), dict(action="store_true")),
+		    mk_path_arg("the file or directory to delete")]),
+	Subcommand("find", find, "recursively list files and directories",
+		   [mk_path_arg("starting directory (default: root)", opt=True)]),
+	Subcommand("ls", ls, "list files and directories",
+		   [mk_path_arg("file or directory to list (default: root)", opt=True)]),
+	Subcommand("dump", dump, "dump plaintext JSON",
+		   [(("-m", "--metadata"), dict(action="store_const", dest="kind",
+						const="metadata", help="dump only metadata")),
+		    (("-d", "--data"), dict(action="store_const", dest="kind",
+					    const="data", help="dump only data"))]),
+]
+
 if __name__ == "__main__":
 	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem",
 					     epilog="FS file can also be specified with the environment"
@@ -312,52 +365,9 @@ if __name__ == "__main__":
 	mainparser.add_argument("-f", "--fsfile", type=str, help="jemf FS file to use")
 
 	subparsers = mainparser.add_subparsers()
-	def subcommand(action, *args, **kwargs):
-		parser = subparsers.add_parser(*args, **kwargs)
-		parser.set_defaults(action=action)
-		return parser
 
-	mkfs_parser = subcommand(mkfs, "mkfs", help="initialize a jemf FS")
-	mkfs_parser.add_argument("-f", "--force", action="store_true")
-
-	mkdir_parser = subcommand(mkdir, "mkdir", help="create a new directory")
-
-	cat_parser = subcommand(cat, "cat", help="print a file to stdout")
-
-	create_parser = subcommand(create, "create", help="create a new file",
-				   epilog=gen_constraints_desc,
-				   formatter_class=argparse.RawDescriptionHelpFormatter)
-
-	edit_parser = subcommand(edit, "edit", help="edit an existing file",
-				 epilog=gen_constraints_desc,
-				 formatter_class=argparse.RawDescriptionHelpFormatter)
-
-	rm_parser = subcommand(rm ,"rm", help="delete a file or directory")
-	rm_parser.add_argument("-r", "--recursive", action="store_true",
-			       help="delete directories recursively")
-
-	find_parser = subcommand(find, "find", help="recursively list files and directories")
-
-	ls_parser = subcommand(ls, "ls", help="list files and directories")
-
-	dump_parser = subcommand(dump, "dump", help="dump plaintext JSON")
-	dump_parser.add_argument("-d", "--data", action="store_const", dest="kind",
-				 const="data", help="dump only data")
-	dump_parser.add_argument("-m", "--metadata", action="store_const", dest="kind",
-				 const="metadata", help="dump only metadata")
-
-	# Commands that require a path
-	for p in [mkdir_parser, cat_parser, create_parser, edit_parser, rm_parser]:
-		p.add_argument("path", metavar="PATH")
-
-	# Commands that take an optional path
-	for p in [find_parser, ls_parser]:
-		p.add_argument("path", metavar="PATH", nargs='?')
-
-	# Commands that allow automatic data generation
-	for p in [create_parser, edit_parser]:
-		p.add_argument("-g", "--generate", metavar="CONSTRAINTS",
-			       help="auto-generate random entry data", type=str)
+	for sc in subcommands:
+		sc.add_to(subparsers)
 
 	args = mainparser.parse_args()
 
