@@ -114,10 +114,10 @@ def load_jemf_fs(filename, passwd):
 def store_jemf_fs(fsd, filename, passwd):
 	fsd["metadata"]["last_modification_time"] = time.time()
 	fsd["metadata"]["last_modification_host"] = socket.gethostbyaddr(socket.gethostname())[0]
-	jfs = pretty_json_dump(fsd)
+	jfs = str.encode(pretty_json_dump(fsd), "utf-8")
 	# TODO: output to temp file, rename over existing?
 	output = run_gpg(["-c", "--yes", "-o", filename], passwd, jfs)
-	if output != "":
+	if output != b'':
 		error("Unexpected output from gpg: %s\n" % output)
 
 def open_jemf_fs(path):
@@ -322,8 +322,8 @@ def mk_cmd_handler(orig_args, fsd, passwd, sc):
 		try:
 			args = sc.parser.parse_args(shlex.split(argstr))
 		except UsageError as ue:
-			if ue.message:
-				sys.stderr.write(ue.message)
+			if ue.args:
+				sys.stderr.write(ue.args[0])
 			return
 		# merge in orig_args if not overridden
 		for k,v in orig_args.__dict__.items():
@@ -332,8 +332,8 @@ def mk_cmd_handler(orig_args, fsd, passwd, sc):
 		try:
 			sc.action(args, fsd, passwd)
 		except UserError as ue:
-			if ue.message:
-				sys.stderr.write(ue.message)
+			if ue.args:
+				sys.stderr.write(ue.args[0])
 	return cmdfun
 
 def argparse_raise_usage_error(self, status=0, message=None):
@@ -467,5 +467,6 @@ if __name__ == "__main__":
 		sys.stderr.write("%s exited with status %d\n" % (cmdname, cpe.returncode))
 		exit(1)
 	except UserError as ue:
-		sys.stderr.write(ue.message)
+		if ue.args:
+			sys.stderr.write(ue.args[0])
 		exit(1)
