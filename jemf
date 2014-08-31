@@ -403,7 +403,8 @@ generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
 
 subcommands = [
 	Subcommand(mkfs, "initialize a jemf FS",
-		   [(("-f", "--force"), dict(help="overwrite an existing file"))]),
+		   [(("-f", "--force"), dict(help="overwrite an existing file",
+					     action="store_true"))]),
 	Subcommand(mkdir, "create a new directory", [mk_path_arg("the directory to create")]),
 	Subcommand(cat, "print a file to stdout", [mk_path_arg("the file to print")]),
 	Subcommand(create, "create a new file",
