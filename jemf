@@ -361,7 +361,14 @@ def shell(args, fsd, passwd):
 		# hack around argparse's inability to report
 		# an error without exiting...
 		sc.parser.exit = argparse_raise_usage_error
-		setattr(JemfShell, "do_%s" % sc.name, mk_cmd_handler(args, fsd, passwd, sc))
+
+		cmdfun = mk_cmd_handler(args, fsd, passwd, sc)
+
+		# get the "jemf" prefix out of the help message
+		sc.parser.prog = sc.name
+		cmdfun.__doc__ = sc.parser.format_help()
+
+		setattr(JemfShell, "do_%s" % sc.name, cmdfun)
 
 	interp = JemfShell( args)#, fsd, passwd,
 			   # [sc for sc in subcommands if sc.name not in ["shell", "mkfs"]])
