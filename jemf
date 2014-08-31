@@ -6,6 +6,8 @@
 #
 # Stores data in a gpg-encrypted JSON file.
 
+from __future__ import print_function
+
 import sys
 import argparse
 import getpass
@@ -47,11 +49,14 @@ class MistypedObject(CorruptFS):
 		self.wrongtype = type(obj)
 		self.path = path
 
+def errprint(s):
+	print(s, file=sys.stderr)
+
 def error(msg):
-	raise UserError("Error: %s\n" % msg)
+	raise UserError("Error: %s" % msg)
 
 def internal_error(msg):
-	raise InternalError("Internal error: %s\n" % msg)
+	raise InternalError("Internal error: %s" % msg)
 
 def confirmed_getpass(label):
 	pass1 = getpass.getpass("Enter %s: " % label)
@@ -152,7 +157,7 @@ def lookup_for_edit(fsd, path, should_exist):
 	tgtcomp = comps[-1]
 	parent = lookup_comps(fsd, parentcomps)
 	if fsobjtype(parent) != DIRECTORY:
-		error("'%s' is not a directory")
+		error("'%s' is not a directory" % os.path.join(*parentcomps))
 	elif not should_exist and tgtcomp in parent:
 		error("'%s' already exists" % path)
 	elif should_exist and tgtcomp not in parent:
@@ -322,8 +327,8 @@ def mk_cmd_handler(orig_args, fsd, passwd, sc):
 		try:
 			args = sc.parser.parse_args(shlex.split(argstr))
 		except UsageError as ue:
-			if ue.args:
-				sys.stderr.write(ue.args[0])
+			if ue.args[0]:
+				errprint(ue.args[0])
 			return
 		# merge in orig_args if not overridden
 		for k,v in orig_args.__dict__.items():
@@ -332,12 +337,15 @@ def mk_cmd_handler(orig_args, fsd, passwd, sc):
 		try:
 			sc.action(args, fsd, passwd)
 		except UserError as ue:
-			if ue.args:
-				sys.stderr.write(ue.args[0])
+			if ue.args[0]:
+				errprint(ue.args[0])
 	return cmdfun
 
-def argparse_raise_usage_error(self, status=0, message=None):
-	raise UsageError(message)
+def mk_raise_usage_error(usage):
+	usg = usage.strip()
+	def func(msg):
+		raise UsageError("%s\n%s" % (usg, msg.strip()))
+	return func
 
 class JemfShell(cmd.Cmd):
 	def __init__(self, args):
@@ -356,21 +364,23 @@ class JemfShell(cmd.Cmd):
 		return
 
 	def default(self, line):
-		sys.stderr.write("Unrecognized command: %s\n" % line.split()[0])
-		sys.stderr.write("(see 'help')\n")
+		errprint("Unrecognized command: %s" % line.split()[0])
+		errprint("(see 'help')")
 
 def shell(args, fsd, passwd):
 	for sc in subcommands:
 		if sc.name in ["shell", "mkfs"]:
 			continue
-		# hack around argparse's inability to report
-		# an error without exiting...
-		sc.parser.exit = argparse_raise_usage_error
-
-		cmdfun = mk_cmd_handler(args, fsd, passwd, sc)
 
 		# get the "jemf" prefix out of the help message
 		sc.parser.prog = sc.name
+
+		# hack around argparse's inability to report
+		# an error without exiting...
+		sc.parser.error = mk_raise_usage_error(sc.parser.format_usage())
+
+		cmdfun = mk_cmd_handler(args, fsd, passwd, sc)
+
 		cmdfun.__doc__ = sc.parser.format_help()
 
 		setattr(JemfShell, "do_%s" % sc.name, cmdfun)
@@ -465,9 +475,9 @@ if __name__ == "__main__":
 
 	except subprocess.CalledProcessError as cpe:
 		cmdname = cpe.cmd[0] if type(cpe.cmd) is list else cpe.cmd.split()[0]
-		sys.stderr.write("%s exited with status %d\n" % (cmdname, cpe.returncode))
+		errprint("%s exited with status %d" % (cmdname, cpe.returncode))
 		exit(1)
 	except UserError as ue:
-		if ue.args:
-			sys.stderr.write(ue.args[0])
+		if ue.args[0]:
+			errprint(ue.args[0], file=sys.stderr)
 		exit(1)
