@@ -494,6 +494,22 @@ class Jemf(object):
 	cd.shell_only = True
 
 	@command
+	def pwd(self, args):
+		"""print working directory"""
+		# dumb brute force...could introduce some extra
+		# machinery to make this more efficient.
+		def get_dirname(obj):
+			parent = obj[".."]
+			if parent is obj:
+				return os.sep
+			for k, v in parent.items():
+				if v is obj:
+					return os.path.join(get_dirname(parent), k)
+			return '???'
+		print(get_dirname(self.cwd))
+	pwd.shell_only = True
+
+	@command
 	def mkdir(self, args):
 		"""create a new directory"""
 		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
