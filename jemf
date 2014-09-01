@@ -320,15 +320,21 @@ class Jemf(object):
 		self.password = password
 		self.data = Directory(None)
 		self.metadata = {}
-		self.extra_sections = []
+		# to preserve any other stuff found in the file
+		# (e.g. if it was last written out by a newer version)
+		self.extra_sections = {}
 
 	def _to_json(self):
-		return pretty_json_dump([self.metadata, self.data] + self.extra_sections)
+		d = self.extra_sections.copy()
+		d["data"] = self.data
+		d["metadata"] = self.metadata
+		return pretty_json_dump(d)
 
 	def _from_json(self, s):
-		j = json.loads(s)
-		# Python 3 extended unpacking syntax would be nice here...
-		self.metadata, self.data, self.extra_sections = j[0], Directory.from_dict(j[1]), j[2:]
+		jd = json.loads(s)
+		self.metadata = jd.pop("metadata")
+		self.data = Directory.from_dict(jd.pop("data"))
+		self.extra_sections = jd
 
 	@classmethod
 	def load_from_path(cls, filename, password):
@@ -336,7 +342,7 @@ class Jemf(object):
 		s = run_gpg(["-d", "--no-mdc-warning", filename], password)
 		try:
 			fs._from_json(s.decode("utf-8"))
-		except ValueError:
+		except KeyError:
 			raise CorruptFS("data/metadata not found")
 		return fs
 
