@@ -101,7 +101,7 @@ def run_gpg(args, passwd, stdin_data=None):
 
 	# close write end of passphrase pipe in child process
 	proc = subprocess.Popen(cmdargs, stdout=subprocess.PIPE, stdin=subprocess.PIPE,
-				close_fds=False, preexec_fn=lambda: pw_w.close())
+				close_fds=False, preexec_fn=pw_w.close)
 
 	# parent doesn't use read end
 	os.close(pw_r)
