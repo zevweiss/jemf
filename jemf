@@ -429,8 +429,19 @@ class Jemf(object):
 
 		return (parent, tgtcomp)
 
+	commands = []
+
+	# parameterized meta-decorator...deep magic
+	def _bind_cmdlist(cmdlist):
+		def new_decorator(orig_decorator):
+			def new_cmd_method(orig_cmd_method):
+				return orig_decorator(orig_cmd_method, cmdlist)
+			return new_cmd_method
+		return new_decorator
+
 	# decorator for methods implementing commands
-	def command(fn):
+	@_bind_cmdlist(commands)
+	def command(fn, cmdlist):
 		method = lambda f: types.MethodType(f, fn)
 
 		@method
@@ -458,6 +469,8 @@ class Jemf(object):
 		for k, v in default_attrs.items():
 			if not hasattr(fn, k):
 				setattr(fn, k, v)
+
+		cmdlist.append(fn)
 
 		return fn
 
@@ -626,7 +639,7 @@ class Jemf(object):
 		"""start an interactive jemf shell"""
 		sh = JemfShell(self, args)
 
-		for cmd in self.commands():
+		for cmd in self.commands:
 			if cmd.batch_only:
 				continue
 
@@ -641,10 +654,6 @@ class Jemf(object):
 
 		sh.cmdloop()
 	shell.batch_only = True
-
-	@classmethod
-	def commands(cls):
-		return [v for v in cls.__dict__.values() if hasattr(v, "cmd_args")]
 
 def open_jemf_fs(args):
 	password = getpass.getpass("Enter password for %s: " % args.fsfile)
@@ -665,8 +674,8 @@ if __name__ == "__main__":
 
 	subparsers = mainparser.add_subparsers(metavar="COMMAND", title=None)
 
-	# sorted so --help output comes out consistently
-	for cmd in sorted(Jemf.commands(), key=lambda c: c.name):
+	# sorted for ordering in --help output
+	for cmd in sorted(Jemf.commands, key=lambda c: c.name):
 		if not cmd.shell_only:
 			cmd.add_to(subparsers)
 		else:
