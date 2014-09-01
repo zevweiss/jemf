@@ -298,9 +298,9 @@ class JemfShell(CommandInterpreter):
 		def cmdfun(self, argstr):
 			try:
 				args = cmd.parser.parse_args(shlex.split(argstr))
-			except UsageError as ue:
-				if ue.args[0]:
-					errprint(ue.args[0])
+			except (ValueError, UsageError) as exc:
+				if exc.args[0]:
+					errprint(exc.args[0])
 				return
 			# merge in original self.args if not overridden
 			for k,v in self.args.__dict__.items():
