@@ -21,6 +21,7 @@ import time
 import tempfile
 from cmd import Cmd as CommandInterpreter
 import shlex
+import types
 
 try:
 	import readline
@@ -307,7 +308,7 @@ class JemfShell(CommandInterpreter):
 				if k not in args:
 					setattr(args, k, v)
 			try:
-				cmd.action(self.fs, args)
+				cmd(self.fs, args)
 			except UserError as ue:
 				if ue.args[0]:
 					errprint(ue.args[0])
@@ -428,13 +429,44 @@ class Jemf(object):
 
 		return (parent, tgtcomp)
 
-	# Methods that implement a command are indicated by having a "cmd_args" attribute
+	# decorator for methods implementing commands
+	def command(fn):
+		method = lambda f: types.MethodType(f, fn)
+
+		@method
+		def add_to(self, subparsers):
+			self.parser = subparsers.add_parser(self.name, description=self.desc,
+							    help=self.desc, **self.parser_kwargs)
+			self.parser.set_defaults(action=self)
+			for a in self.cmd_args:
+				self.parser.add_argument(*a[0], **a[1])
+
+		@method
+		def create_parser(self):
+			tmp = argparse.ArgumentParser().add_subparsers()
+			self.add_to(tmp)
+
+		default_attrs = dict(cmd_args = [],
+				     parser_kwargs = {},
+				     batch_only = False,
+				     shell_only = False,
+				     name = fn.__name__,
+				     desc = fn.__doc__,
+				     add_to = add_to,
+				     create_parser = create_parser)
+
+		for k, v in default_attrs.items():
+			if not hasattr(fn, k):
+				setattr(fn, k, v)
+
+		return fn
 
 	_generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
 						    help="auto-generate entry data"))
 	_force_arg = (("-f", "--force"), dict(help="overwriting an existing file",
 					      action="store_true"))
 
+	@command
 	def mkfs(self, args):
 		"""initialize a new jemf FS"""
 		self.data = Directory(None)
@@ -442,12 +474,16 @@ class Jemf(object):
 		self.extra_sections = {}
 		self.write_out()
 	mkfs.cmd_args = [_force_arg]
+	mkfs.batch_only = True
 
+	@command
 	def cd(self, args):
 		"""change working directory"""
 		self.cwd = self.lookup_path(args.path) if args.path is not None else self.data
 	cd.cmd_args = [mk_path_arg("directory to change to (default: root)", opt=True)]
+	cd.shell_only = True
 
+	@command
 	def mkdir(self, args):
 		"""create a new directory"""
 		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
@@ -455,6 +491,7 @@ class Jemf(object):
 		self.write_out()
 	mkdir.cmd_args = [mk_path_arg("the directory to create")]
 
+	@command
 	def create(self, args):
 		"""create a new file"""
 		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
@@ -464,9 +501,10 @@ class Jemf(object):
 			parent[newname] = generate_data(args.generate)
 		self.write_out()
 	create.cmd_args = [_generate_arg, mk_path_arg("the file to create")]
-	create.parser_args = dict(epilog=gen_constraints_desc,
-				  formatter_class=argparse.RawDescriptionHelpFormatter)
+	create.parser_kwargs = dict(epilog=gen_constraints_desc,
+				    formatter_class=argparse.RawDescriptionHelpFormatter)
 
+	@command
 	def edit(self, args):
 		"""edit an existing file"""
 		parent, tgtname = self.lookup_for_edit(args.path, should_exist=True)
@@ -479,9 +517,10 @@ class Jemf(object):
 			parent[tgtname] = generate_data(args.generate)
 		self.write_out()
 	edit.cmd_args = [_generate_arg, mk_path_arg("the file to edit")]
-	edit.parser_args = dict(epilog=gen_constraints_desc,
-				formatter_class=argparse.RawDescriptionHelpFormatter)
+	edit.parser_kwargs = dict(epilog=gen_constraints_desc,
+				  formatter_class=argparse.RawDescriptionHelpFormatter)
 
+	@command
 	def mv(self, args):
 		"""move/rename a file or directory"""
 		curparent, objname = self.lookup_for_edit(args.frompath, should_exist=True)
@@ -513,6 +552,7 @@ class Jemf(object):
 		       (("frompath",), dict(metavar="FROM", help="current path/name")),
 		       (("topath",), dict(metavar="TO", help="new path/name"))]
 
+	@command
 	def rm(self, args):
 		"""delete a file or directory"""
 		parent, tgtname = self.lookup_for_edit(args.path, should_exist=True)
@@ -528,6 +568,7 @@ class Jemf(object):
 	rm.cmd_args = [(("-r", "--recursive"), dict(action="store_true")),
 		       mk_path_arg("the file or directory to delete")]
 
+	@command
 	def cat(self, args):
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
@@ -539,6 +580,7 @@ class Jemf(object):
 		sys.stdout.write(item + '\n')
 	cat.cmd_args = [mk_path_arg("the file to print")]
 
+	@command
 	def find(self, args):
 		"""recursively list files and directories"""
 		if args.path is None:
@@ -547,6 +589,7 @@ class Jemf(object):
 			recursive_list(self.lookup_path(args.path), args.path)
 	find.cmd_args = [mk_path_arg("starting directory (default: .)", opt=True)]
 
+	@command
 	def ls(self, args):
 		"""list files and directories"""
 		if args.path is not None:
@@ -563,6 +606,7 @@ class Jemf(object):
 			raise MistypedObject(args.path, obj)
 	ls.cmd_args = [mk_path_arg("file or directory to list (default: .)", opt=True)]
 
+	@command
 	def dump(self, args):
 		"""dump plaintext JSON"""
 		if args.kind == "data":
@@ -577,12 +621,13 @@ class Jemf(object):
 			 (("-d", "--data"), dict(action="store_const", dest="kind",
 						 const="data", help="dump only data"))]
 
+	@command
 	def shell(self, args):
 		"""start an interactive jemf shell"""
 		sh = JemfShell(self, args)
 
-		for _, cmd in self.commands.items():
-			if cmd.name in ["shell", "mkfs"]:
+		for cmd in self.commands():
+			if cmd.batch_only:
 				continue
 
 			# get the "jemf" prefix out of the help message
@@ -595,34 +640,11 @@ class Jemf(object):
 			sh._add_cmd_handler(cmd)
 
 		sh.cmdloop()
-	shell.cmd_args = []
+	shell.batch_only = True
 
-	class Command(object):
-		def __init__(self, action, cmdargs, **parser_kwargs):
-			self.action = action
-			self.name = self.action.__name__
-			self.desc = self.action.__doc__
-			self.cmdargs = cmdargs
-			self.parser_kwargs = parser_kwargs
-
-		def add_to(self, subparsers):
-			self.parser = subparsers.add_parser(self.name, description=self.desc,
-							    help=self.desc, **self.parser_kwargs)
-			self.parser.set_defaults(action=self.action)
-			for a in self.cmdargs:
-				self.parser.add_argument(*a[0], **a[1])
-
-		def create_parser(self):
-			tmp = argparse.ArgumentParser().add_subparsers()
-			self.add_to(tmp)
-
-	commands = {}
-
-# plumb things together for subcommands...
-for _, v in Jemf.__dict__.items():
-	if hasattr(v, "cmd_args"):
-		kw = v.parser_args if hasattr(v, "parser_args") else {}
-		Jemf.commands[v.__name__] = Jemf.Command(v, v.cmd_args, **kw)
+	@classmethod
+	def commands(cls):
+		return [v for v in cls.__dict__.values() if hasattr(v, "cmd_args")]
 
 def open_jemf_fs(args):
 	password = getpass.getpass("Enter password for %s: " % args.fsfile)
@@ -644,9 +666,8 @@ if __name__ == "__main__":
 	subparsers = mainparser.add_subparsers(metavar="COMMAND", title=None)
 
 	# sorted so --help output comes out consistently
-	for name, cmd in sorted(Jemf.commands.items()):
-		# 'cd' is only available in the shell
-		if name != "cd":
+	for cmd in sorted(Jemf.commands(), key=lambda c: c.name):
+		if not cmd.shell_only:
 			cmd.add_to(subparsers)
 		else:
 			cmd.create_parser()
@@ -666,8 +687,8 @@ if __name__ == "__main__":
 			error("no jemf FS found or specified")
 
 	try:
-		# matching by __name__ here is kind of ugly...
-		ctor = new_jemf_fs if args.action.__name__ == "mkfs" else open_jemf_fs
+		# matching by name here is kind of ugly...
+		ctor = new_jemf_fs if args.action.name == "mkfs" else open_jemf_fs
 		args.action(ctor(args), args)
 
 	except subprocess.CalledProcessError as cpe:
