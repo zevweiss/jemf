@@ -323,7 +323,7 @@ def recursive_list(obj, pfx):
 
 def find(args, fsd, unused_passwd):
 	if args.path is None:
-		recursive_list(fsd["data"], "/")
+		recursive_list(fsd["data"], os.sep)
 	else:
 		recursive_list(lookup_path(fsd, args.path), args.path)
 
@@ -337,7 +337,7 @@ def ls(args, fsd, unused_passwd):
 		sys.stdout.write(args.path + '\n')
 	elif fsobjtype(obj) == DIRECTORY:
 		for n, o in sorted(obj.items()):
-			sys.stdout.write("%s%s\n" % (n, "/" if fsobjtype(o) == DIRECTORY else ""))
+			sys.stdout.write("%s%s\n" % (n, os.sep if fsobjtype(o) == DIRECTORY else ""))
 	else:
 		raise MistypedObject(args.path, obj)
 
