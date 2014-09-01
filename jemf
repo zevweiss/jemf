@@ -538,5 +538,5 @@ if __name__ == "__main__":
 		exit(1)
 	except UserError as ue:
 		if ue.args[0]:
-			errprint(ue.args[0], file=sys.stderr)
+			errprint(ue.args[0])
 		exit(1)
