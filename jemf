@@ -454,7 +454,9 @@ class Subcommand(object):
 		self.parser_kwargs = parser_kwargs
 
 	def add_to(self, subparsers):
-		self.parser = subparsers.add_parser(self.name, *self.parser_args, **self.parser_kwargs)
+		self.parser = subparsers.add_parser(self.name, *self.parser_args,
+						    description=self.desc, help=self.desc,
+						    **self.parser_kwargs)
 		self.parser.set_defaults(action=self.action)
 		for a in self.cmdargs:
 			self.parser.add_argument(*a[0], **a[1])
@@ -504,7 +506,7 @@ if __name__ == "__main__":
 
 	mainparser.add_argument("-f", "--fsfile", type=str, help="jemf FS file to use")
 
-	subparsers = mainparser.add_subparsers()
+	subparsers = mainparser.add_subparsers(metavar="COMMAND", title=None)
 
 	for sc in subcommands:
 		sc.add_to(subparsers)
