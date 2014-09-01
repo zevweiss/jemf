@@ -439,6 +439,34 @@ class Jemf(object):
 			parent[tgtname] = generate_data(args.generate)
 		self.write_out()
 
+	def mv(self, args):
+		"""move/rename a file or directory"""
+		curparent, objname = self.lookup_for_edit(args.frompath, should_exist=True)
+		obj = curparent[objname]
+		topath = args.topath
+		newparent, newobjname = self.lookup_for_edit(topath, should_exist=None)
+		if newobjname in newparent and fsobjtype(newparent[newobjname]) == DIRECTORY:
+			newparent = newparent[newobjname]
+			newobjname = objname
+			topath = os.path.join(args.topath, objname)
+
+		p = newparent
+		while p[".."] is not p:
+			if p is obj:
+				error("can't move '%s' inside itself" % args.frompath)
+			p = p[".."]
+
+		if newobjname in newparent:
+			existing = newparent[newobjname]
+			if not args.force:
+				error("'%s' exists (user '-f' to overwrite)" % topath)
+			elif fsobjtype(existing) == DIRECTORY and len(existing) > 0:
+				error("'%s' is not empty" % topath)
+
+		newparent[newobjname] = obj
+		del curparent[objname]
+		self.write_out()
+
 	def rm(self, args):
 		"""delete a file or directory"""
 		parent, tgtname = self.lookup_for_edit(args.path, should_exist=True)
@@ -555,6 +583,9 @@ subcommands = [
 	Subcommand("edit", [generate_arg, mk_path_arg("the file to edit")],
 		   epilog=gen_constraints_desc,
 		   formatter_class=argparse.RawDescriptionHelpFormatter),
+	Subcommand("mv", [force_arg,
+			  (("frompath",), dict(metavar="FROM", help="current path/name")),
+			  (("topath",), dict(metavar="TO", help="new path/name"))]),
 	Subcommand("rm", [(("-r", "--recursive"), dict(action="store_true")),
 			  mk_path_arg("the file or directory to delete")]),
 	Subcommand("find", [mk_path_arg("starting directory (default: root)", opt=True)]),
