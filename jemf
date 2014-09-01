@@ -335,6 +335,7 @@ class Jemf(object):
 		# to preserve any other stuff found in the file
 		# (e.g. if it was last written out by a newer version)
 		self.extra_sections = {}
+		self.cwd = self.data
 
 	def _to_json(self):
 		d = self.extra_sections.copy()
@@ -347,6 +348,7 @@ class Jemf(object):
 		self.metadata = jd.pop("metadata")
 		self.data = Directory.from_dict(jd.pop("data"))
 		self.extra_sections = jd
+		self.cwd = self.data
 
 	@classmethod
 	def load_from_path(cls, filename, password):
@@ -381,8 +383,8 @@ class Jemf(object):
 		os.rename(tmppath, filename)
 		# FIXME: fsync directory? python stdlib doesn't seem to have opendir()...
 
-	def _lookup_comps(self, comps, noexc=False):
-		fsdir = self.data
+	def _lookup_comps(self, root, comps, noexc=False):
+		fsdir = root
 		trail = os.sep
 		for c in comps:
 			try:
@@ -396,20 +398,25 @@ class Jemf(object):
 		return fsdir
 
 	def lookup_path(self, path, noexc=False):
-		return self._lookup_comps(path_components(path), noexc=noexc)
+		if len(path) > 0 and path[0] == os.sep:
+			root = self.data
+		else:
+			root = self.cwd
+		return self._lookup_comps(root, path_components(path), noexc=noexc)
 
-	def lookup_for_edit(self, path, should_exist, noexc=False):
+	def lookup_for_edit(self, path, should_exist):
 		"""Lookup the parent of 'path', returning a tuple of it and the last
 		component of 'path'."""
+		root = self.data if path[0] == os.sep else self.cwd
 		comps = path_components(path)
-		# special-case hack for looking up the root directory
-		if len(comps) == 0:
-			if should_exist is not None and not should_exist:
-				error("'%s' already exists" % path)
-			return (self.data, os.path.curdir)
-		parentcomps = comps[:-1]
-		tgtcomp = comps[-1]
-		parent = self._lookup_comps(parentcomps, noexc=noexc)
+
+		if len(comps) > 0:
+			parent = self._lookup_comps(root, comps[:-1])
+			tgtcomp = comps[-1]
+		else:
+			parent = root
+			tgtcomp = os.path.curdir
+
 		if fsobjtype(parent) != DIRECTORY:
 			error("'%s' is not a directory" % os.path.join(*parentcomps))
 
@@ -435,6 +442,11 @@ class Jemf(object):
 		self.extra_sections = {}
 		self.write_out()
 	mkfs.cmd_args = [_force_arg]
+
+	def cd(self, args):
+		"""change working directory"""
+		self.cwd = self.lookup_path(args.path) if args.path is not None else self.data
+	cd.cmd_args = [mk_path_arg("directory to change to (default: root)", opt=True)]
 
 	def mkdir(self, args):
 		"""create a new directory"""
@@ -530,17 +542,17 @@ class Jemf(object):
 	def find(self, args):
 		"""recursively list files and directories"""
 		if args.path is None:
-			recursive_list(self.data, os.sep)
+			recursive_list(self.cwd, os.path.curdir)
 		else:
 			recursive_list(self.lookup_path(args.path), args.path)
-	find.cmd_args = [mk_path_arg("starting directory (default: root)", opt=True)]
+	find.cmd_args = [mk_path_arg("starting directory (default: .)", opt=True)]
 
 	def ls(self, args):
 		"""list files and directories"""
 		if args.path is not None:
 			obj = self.lookup_path(args.path)
 		else:
-			obj = self.data
+			obj = self.cwd
 
 		if fsobjtype(obj) == FILE:
 			sys.stdout.write(args.path + '\n')
@@ -549,7 +561,7 @@ class Jemf(object):
 				sys.stdout.write("%s%s\n" % (n, os.sep if fsobjtype(o) == DIRECTORY else ""))
 		else:
 			raise MistypedObject(args.path, obj)
-	ls.cmd_args = [mk_path_arg("file or directory to list (default: root)", opt=True)]
+	ls.cmd_args = [mk_path_arg("file or directory to list (default: .)", opt=True)]
 
 	def dump(self, args):
 		"""dump plaintext JSON"""
@@ -600,6 +612,10 @@ class Jemf(object):
 			for a in self.cmdargs:
 				self.parser.add_argument(*a[0], **a[1])
 
+		def create_parser(self):
+			tmp = argparse.ArgumentParser().add_subparsers()
+			self.add_to(tmp)
+
 	commands = {}
 
 # plumb things together for subcommands...
@@ -628,8 +644,12 @@ if __name__ == "__main__":
 	subparsers = mainparser.add_subparsers(metavar="COMMAND", title=None)
 
 	# sorted so --help output comes out consistently
-	for _, cmd in sorted(Jemf.commands.items()):
-		cmd.add_to(subparsers)
+	for name, cmd in sorted(Jemf.commands.items()):
+		# 'cd' is only available in the shell
+		if name != "cd":
+			cmd.add_to(subparsers)
+		else:
+			cmd.create_parser()
 
 	args = mainparser.parse_args()
 
