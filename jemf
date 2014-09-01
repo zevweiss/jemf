@@ -457,18 +457,15 @@ class Jemf(object):
 			tmp = argparse.ArgumentParser().add_subparsers()
 			self.add_to(tmp)
 
-		default_attrs = dict(cmd_args = [],
-				     parser_kwargs = {},
-				     batch_only = False,
-				     shell_only = False,
-				     name = fn.__name__,
-				     desc = fn.__doc__,
-				     add_to = add_to,
-				     create_parser = create_parser)
-
-		for k, v in default_attrs.items():
-			if not hasattr(fn, k):
-				setattr(fn, k, v)
+		# supply default command attributes
+		fn.cmd_args = []
+		fn.parser_kwargs = {}
+		fn.batch_only = False
+		fn.shell_only = False
+		fn.name = fn.__name__
+		fn.desc = fn.__doc__
+		fn.add_to = add_to
+		fn.create_parser = create_parser
 
 		cmdlist.append(fn)
 
