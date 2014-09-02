@@ -597,14 +597,13 @@ class Jemf(object):
 	def rm(self, args):
 		"""delete a file or directory"""
 		parent, tgtname = self.lookup_for_edit(args.path, should_exist=True)
-		if args.recursive:
-			del parent[tgtname]
+		obj = parent[tgtname]
+		if obj is self.data:
+			error("can't delete '%s'" % os.sep)
+		elif fsobjtype(obj) == DIRECTORY and len(obj) > 0 and not args.recursive:
+			error("'%s' is not empty" % args.path)
 		else:
-			obj = parent[tgtname]
-			if fsobjtype(obj) == DIRECTORY and len(obj) > 0:
-				error("'%s' is not empty" % args.path)
-			else:
-				del parent[tgtname]
+			del parent[tgtname]
 
 	@reader([mk_path_arg("the file to print")])
 	def cat(self, args):
