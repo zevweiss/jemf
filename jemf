@@ -633,7 +633,7 @@ class Jemf(object):
 		else:
 			del parent[tgtname]
 
-	@reader([mk_path_arg("the file to print")])
+	@reader([mk_path_arg("the file to print"), _force_arg])
 	def cat(self, args):
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
@@ -642,7 +642,13 @@ class Jemf(object):
 			error("'%s' is a directory" % args.path)
 		elif t != FILE:
 			raise MistypedObject(args.path, item)
-		self.output_secret(item + '\n')
+		if self.pipe_to is None and sys.stdout.isatty():
+			if not args.force:
+				error("won't print to terminal without '-f'")
+			suffix = '\n'
+		else:
+			suffix = ''
+		self.output_secret(item + suffix)
 
 	@reader([mk_path_arg("starting directory (default: .)", opt=True)])
 	def find(self, args):
