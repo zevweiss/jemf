@@ -100,7 +100,7 @@ def fsobjtype(obj):
 		return UNKNOWN
 
 def pretty_json_dump(d):
-	return json.dumps(d, sort_keys=True, indent=4, separators=(',', ': ')) + '\n'
+	return json.dumps(d, sort_keys=True, indent=4, separators=(',', ': '))
 
 def run_gpg(args, passwd, stdin_data=None):
 	pw_r, pw_w = pipe()
@@ -339,6 +339,7 @@ class Jemf(object):
 	def __init__(self, filename, password):
 		self.filename = filename
 		self.password = password
+		self.pipe_to = None
 		self.data = Directory(None)
 		self.metadata = {}
 		# to preserve any other stuff found in the file
@@ -369,10 +370,23 @@ class Jemf(object):
 			raise CorruptFS("data/metadata not found")
 		return fs
 
+	def output_secret(self, s):
+		if self.pipe_to is None:
+			print(s, end='')
+		else:
+			proc = subprocess.Popen(self.pipe_to, shell=True, stdin=subprocess.PIPE)
+			proc.communicate(str.encode(s, "utf-8"))
+			status = proc.wait()
+			if status != 0:
+				errprint("'%s' exited with status %d", self.pipe_to, status)
+			else:
+				# might stderr be more appropriate here?
+				print("[sent output to '%s']" % self.pipe_to)
+
 	def _write_out(self):
 		self.metadata["last_modification_time"] = time.time()
 		self.metadata["last_modification_host"] = socket.gethostbyaddr(socket.gethostname())[0]
-		jemf_buf = str.encode(self._to_json(), "utf-8")
+		jemf_buf = str.encode(self._to_json(), "utf-8") + b'\n'
 
 		# If filename is a symlink, do the new file write & rename in
 		# the  directory in which the pointed-to file resides
@@ -627,7 +641,7 @@ class Jemf(object):
 			error("'%s' is a directory" % args.path)
 		elif t != FILE:
 			raise MistypedObject(args.path, item)
-		sys.stdout.write(item + '\n')
+		self.output_secret(item + '\n')
 
 	@reader([mk_path_arg("starting directory (default: .)", opt=True)])
 	def find(self, args):
@@ -665,9 +679,11 @@ class Jemf(object):
 			s = pretty_json_dump(self.metadata)
 		else:
 			s = self._to_json()
-		sys.stdout.write(s)
+		self.output_secret(s)
 
-	@reader([], batch_only=True)
+	@reader([(("-p", "--pipe-to"), dict(metavar="CMD", type=str, default=None,
+					    help="shell command to pipe output to for commands"
+					    " that print file data"))], batch_only=True)
 	def shell(self, args):
 		"""start an interactive jemf shell"""
 		sh = JemfShell(self, args)
@@ -685,7 +701,13 @@ class Jemf(object):
 
 			sh._add_cmd_handler(cmd)
 
+		# saving and restoring self.pipe_to here is kind of
+		# overkill, but aesthetically slightly preferable to
+		# clobbering it completely.
+		orig_pipe_to = self.pipe_to
+		self.pipe_to = args.pipe_to
 		sh.cmdloop()
+		self.pipe_to = orig_pipe_to
 
 def open_jemf_fs(args):
 	password = getpass.getpass("Enter password for %s: " % args.fsfile)
