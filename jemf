@@ -619,7 +619,8 @@ class Jemf(object):
 		newparent[newobjname] = obj
 		del curparent[objname]
 
-	@writer([(("-r", "--recursive"), dict(action="store_true")),
+	@writer([(("-r", "--recursive"), dict(help="recursively delete directory contents",
+					      action="store_true")),
 		 mk_path_arg("the file or directory to delete")])
 	def rm(self, args):
 		"""delete a file or directory"""
