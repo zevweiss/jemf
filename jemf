@@ -641,7 +641,9 @@ class Jemf(object):
 		else:
 			del parent[tgtname]
 
-	@reader([mk_path_arg("the file to print"), _force_arg])
+	@reader([mk_path_arg("the file to print"),
+		 (("-f", "--force"), dict(help="disable anti-tty-print interlock",
+					  action="store_true"))])
 	def cat(self, args):
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
