@@ -714,17 +714,18 @@ if __name__ == "__main__":
 				args.fsfile = p
 				break
 
+	# matching by name here is kind of ugly...
+	doing_mkfs = args.action.name == "mkfs"
+
 	if args.fsfile is None:
-		if args.action is Jemf.mkfs:
+		if doing_mkfs:
 			args.fsfile = default_fspaths[0]
 		else:
 			error("no jemf FS found or specified")
 
 	try:
-		# matching by name here is kind of ugly...
-		ctor = new_jemf_fs if args.action.name == "mkfs" else open_jemf_fs
+		ctor = new_jemf_fs if doing_mkfs else open_jemf_fs
 		args.action(ctor(args), args)
-
 	except subprocess.CalledProcessError as cpe:
 		cmdname = cpe.cmd[0] if type(cpe.cmd) is list else cpe.cmd.split()[0]
 		errprint("%s exited with status %d" % (cmdname, cpe.returncode))
