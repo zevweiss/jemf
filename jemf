@@ -433,16 +433,18 @@ class Jemf(object):
 	commands = []
 
 	# parameterized meta-decorator...deep magic
-	def _bind_args(**kwargs):
+	def _bind_args(**bound_kwargs):
 		def new_decorator(orig_decorator):
-			def new_cmd_method(orig_cmd_method):
-				return orig_decorator(orig_cmd_method, **kwargs)
+			@functools.wraps(orig_decorator)
+			def new_cmd_method(orig_cmd_method, *args, **kwargs):
+				kwargs.update(bound_kwargs)
+				return orig_decorator(orig_cmd_method, *args, **kwargs)
 			return new_cmd_method
 		return new_decorator
 
 	# inner decorator for methods implementing commands
 	@_bind_args(cmdlist=commands)
-	def _command(fn, cmdlist):
+	def _command(fn, cmdlist, **kwargs):
 		method = lambda f: types.MethodType(f, fn)
 
 		@method
@@ -459,14 +461,20 @@ class Jemf(object):
 			self.add_to(tmp)
 
 		# supply default command attributes
-		fn.cmd_args = []
-		fn.parser_kwargs = {}
-		fn.batch_only = False
-		fn.shell_only = False
-		fn.name = fn.__name__
-		fn.desc = fn.__doc__
-		fn.add_to = add_to
-		fn.create_parser = create_parser
+		attrs = dict(cmd_args = [],
+			     parser_kwargs = {},
+			     batch_only = False,
+			     shell_only = False,
+			     name = fn.__name__,
+			     desc = fn.__doc__,
+			     add_to = add_to,
+			     create_parser = create_parser)
+
+		# defaults overridable via @reader()/@writer kwargs
+		attrs.update(kwargs)
+
+		for a, v in attrs.items():
+			setattr(fn, a, v)
 
 		cmdlist.append(fn)
 
@@ -474,40 +482,41 @@ class Jemf(object):
 
 	# decorator for commands that modify the FS
 	@_bind_args(inner_decorator=_command)
-	def writer(fn, inner_decorator):
-		@functools.wraps(fn)
-		def new_fn(self, *args, **kwargs):
-			fn(self, *args, **kwargs)
-			self._write_out()
-		return inner_decorator(new_fn)
+	def writer(cmd_args, inner_decorator, **kwargs):
+		def wr_dec(fn):
+			@functools.wraps(fn)
+			def new_fn(self, *args, **kwargs):
+				fn(self, *args, **kwargs)
+				self._write_out()
+			return inner_decorator(new_fn, cmd_args=cmd_args, **kwargs)
+		return wr_dec
 
 	# decorator for read-only commands
 	@_bind_args(inner_decorator=_command)
-	def reader(fn, inner_decorator):
-		return inner_decorator(fn)
+	def reader(cmd_args, inner_decorator, **kwargs):
+		def rd_dec(fn):
+			return inner_decorator(fn, cmd_args=cmd_args, **kwargs)
+		return rd_dec
 
 	_generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
 						    help="auto-generate entry data"))
 	_force_arg = (("-f", "--force"), dict(help="overwriting an existing file",
 					      action="store_true"))
 
-	@writer
+	@writer([_force_arg], batch_only=True)
 	def mkfs(self, args):
 		"""initialize a new jemf FS"""
 		self.data = Directory(None)
 		self.metadata = {}
 		self.extra_sections = {}
-	mkfs.cmd_args = [_force_arg]
-	mkfs.batch_only = True
 
-	@reader
+	@reader([mk_path_arg("directory to change to (default: root)", opt=True)],
+		shell_only=True)
 	def cd(self, args):
 		"""change working directory"""
 		self.cwd = self.lookup_path(args.path) if args.path is not None else self.data
-	cd.cmd_args = [mk_path_arg("directory to change to (default: root)", opt=True)]
-	cd.shell_only = True
 
-	@reader
+	@reader([], shell_only=True)
 	def pwd(self, args):
 		"""print working directory"""
 		# dumb brute force...could introduce some extra
@@ -521,16 +530,16 @@ class Jemf(object):
 					return os.path.join(get_dirname(parent), k)
 			return '???'
 		print(get_dirname(self.cwd))
-	pwd.shell_only = True
 
-	@writer
+	@writer([mk_path_arg("the directory to create")])
 	def mkdir(self, args):
 		"""create a new directory"""
 		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
 		parent[newname] = Directory(parent)
-	mkdir.cmd_args = [mk_path_arg("the directory to create")]
 
-	@writer
+	@writer([_generate_arg, mk_path_arg("the file to create")],
+		parser_kwargs=dict(epilog=gen_constraints_desc,
+				   formatter_class=argparse.RawDescriptionHelpFormatter))
 	def create(self, args):
 		"""create a new file"""
 		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
@@ -538,11 +547,10 @@ class Jemf(object):
 			parent[newname] = confirmed_getpass("data for %s" % args.path)
 		else:
 			parent[newname] = generate_data(args.generate)
-	create.cmd_args = [_generate_arg, mk_path_arg("the file to create")]
-	create.parser_kwargs = dict(epilog=gen_constraints_desc,
-				    formatter_class=argparse.RawDescriptionHelpFormatter)
 
-	@writer
+	@writer([_generate_arg, mk_path_arg("the file to edit")],
+		parser_kwargs=dict(epilog=gen_constraints_desc,
+				   formatter_class=argparse.RawDescriptionHelpFormatter))
 	def edit(self, args):
 		"""edit an existing file"""
 		parent, tgtname = self.lookup_for_edit(args.path, should_exist=True)
@@ -553,11 +561,10 @@ class Jemf(object):
 			parent[tgtname] = confirmed_getpass("new data for %s" % args.path)
 		else:
 			parent[tgtname] = generate_data(args.generate)
-	edit.cmd_args = [_generate_arg, mk_path_arg("the file to edit")]
-	edit.parser_kwargs = dict(epilog=gen_constraints_desc,
-				  formatter_class=argparse.RawDescriptionHelpFormatter)
 
-	@writer
+	@writer([_force_arg,
+		 (("frompath",), dict(metavar="FROM", help="current path/name")),
+		 (("topath",), dict(metavar="TO", help="new path/name"))])
 	def mv(self, args):
 		"""move/rename a file or directory"""
 		curparent, objname = self.lookup_for_edit(args.frompath, should_exist=True)
@@ -584,11 +591,9 @@ class Jemf(object):
 
 		newparent[newobjname] = obj
 		del curparent[objname]
-	mv.cmd_args = [_force_arg,
-		       (("frompath",), dict(metavar="FROM", help="current path/name")),
-		       (("topath",), dict(metavar="TO", help="new path/name"))]
 
-	@writer
+	@writer([(("-r", "--recursive"), dict(action="store_true")),
+		 mk_path_arg("the file or directory to delete")])
 	def rm(self, args):
 		"""delete a file or directory"""
 		parent, tgtname = self.lookup_for_edit(args.path, should_exist=True)
@@ -600,10 +605,8 @@ class Jemf(object):
 				error("'%s' is not empty" % args.path)
 			else:
 				del parent[tgtname]
-	rm.cmd_args = [(("-r", "--recursive"), dict(action="store_true")),
-		       mk_path_arg("the file or directory to delete")]
 
-	@reader
+	@reader([mk_path_arg("the file to print")])
 	def cat(self, args):
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
@@ -613,18 +616,16 @@ class Jemf(object):
 		elif t != FILE:
 			raise MistypedObject(args.path, item)
 		sys.stdout.write(item + '\n')
-	cat.cmd_args = [mk_path_arg("the file to print")]
 
-	@reader
+	@reader([mk_path_arg("starting directory (default: .)", opt=True)])
 	def find(self, args):
 		"""recursively list files and directories"""
 		if args.path is None:
 			recursive_list(self.cwd, os.path.curdir)
 		else:
 			recursive_list(self.lookup_path(args.path), args.path)
-	find.cmd_args = [mk_path_arg("starting directory (default: .)", opt=True)]
 
-	@reader
+	@reader([mk_path_arg("file or directory to list (default: .)", opt=True)])
 	def ls(self, args):
 		"""list files and directories"""
 		if args.path is not None:
@@ -639,9 +640,11 @@ class Jemf(object):
 				sys.stdout.write("%s%s\n" % (n, os.sep if fsobjtype(o) == DIRECTORY else ""))
 		else:
 			raise MistypedObject(args.path, obj)
-	ls.cmd_args = [mk_path_arg("file or directory to list (default: .)", opt=True)]
 
-	@reader
+	@reader([(("-m", "--metadata"), dict(action="store_const", dest="kind",
+					     const="metadata", help="dump only metadata")),
+		 (("-d", "--data"), dict(action="store_const", dest="kind",
+					 const="data", help="dump only data"))])
 	def dump(self, args):
 		"""dump plaintext JSON"""
 		if args.kind == "data":
@@ -651,12 +654,8 @@ class Jemf(object):
 		else:
 			s = self._to_json()
 		sys.stdout.write(s)
-	dump.cmd_args = [(("-m", "--metadata"), dict(action="store_const", dest="kind",
-						     const="metadata", help="dump only metadata")),
-			 (("-d", "--data"), dict(action="store_const", dest="kind",
-						 const="data", help="dump only data"))]
 
-	@reader
+	@reader([], batch_only=True)
 	def shell(self, args):
 		"""start an interactive jemf shell"""
 		sh = JemfShell(self, args)
@@ -675,7 +674,6 @@ class Jemf(object):
 			sh._add_cmd_handler(cmd)
 
 		sh.cmdloop()
-	shell.batch_only = True
 
 def open_jemf_fs(args):
 	password = getpass.getpass("Enter password for %s: " % args.fsfile)
