@@ -210,6 +210,9 @@ def recursive_list(obj, pfx):
 	else:
 		raise MistypedObject(pfx, obj)
 
+class File(str):
+	pass
+
 class Directory(dict):
 	def __init__(self, parent):
 		if parent is None:
@@ -225,6 +228,10 @@ class Directory(dict):
 		for name, obj in d.items():
 			if isinstance(obj, dict):
 				obj = cls.from_dict(obj, newdir)
+			elif isinstance(obj, strtypes):
+				obj = File(obj)
+			else:
+				raise ValueError("non-dict, non-string object (%s)" % type(obj))
 			newdir[name] = obj
 		return newdir
 
