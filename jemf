@@ -514,7 +514,13 @@ class Jemf(object):
 		shell_only=True)
 	def cd(self, args):
 		"""change working directory"""
-		self.cwd = self.lookup_path(args.path) if args.path is not None else self.data
+		if args.path is not None:
+			obj = self.lookup_path(args.path)
+			if not isinstance(obj, Directory):
+				error("'%s' is not a directory" % args.path)
+		else:
+			obj = self.data
+		self.cwd = obj
 
 	@reader([], shell_only=True)
 	def pwd(self, args):
