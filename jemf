@@ -61,13 +61,6 @@ class InternalError(Exception):
 class CorruptFS(Exception):
 	pass
 
-class MistypedObject(CorruptFS):
-	def __init__(self, path, obj):
-		msg = "Mistyped object '%s': %s" % (path, str(type(obj)))
-		super(MistypedObject, self).__init__(msg)
-		self.wrongtype = type(obj)
-		self.path = path
-
 def errprint(*args, **kwargs):
 	print(*args, file=sys.stderr, **kwargs)
 
@@ -90,17 +83,6 @@ def find_fs():
 		if os.path.exists(p):
 			return p
 	return None
-
-UNKNOWN = 0
-FILE = 1
-DIRECTORY = 2
-def fsobjtype(obj):
-	if isinstance(obj, dict):
-		return DIRECTORY
-	elif isinstance(obj, strtypes):
-		return FILE
-	else:
-		return UNKNOWN
 
 def pretty_json_dump(d):
 	return json.dumps(d, sort_keys=True, indent=4, separators=(',', ': '))
@@ -211,14 +193,10 @@ def generate_data(constraints):
 	return ''.join(l[:cdict['L']])
 
 def recursive_list(obj, pfx):
-	t = fsobjtype(obj)
-	if t == FILE or t == DIRECTORY:
-		sys.stdout.write("%s\n" % pfx)
-		if t == DIRECTORY:
-			for n, o in obj.items():
-				recursive_list(o, os.path.join(pfx, n))
-	else:
-		raise MistypedObject(pfx, obj)
+	sys.stdout.write("%s\n" % pfx)
+	if isdir(obj):
+		for n, o in obj.items():
+			recursive_list(o, os.path.join(pfx, n))
 
 class File(str):
 	pass
@@ -261,6 +239,14 @@ class Directory(dict):
 	def __delitem__(self, k):
 		assert k not in self._specials
 		self._dict.__delitem__(k)
+
+def isdir(obj):
+	assert isinstance(obj, (File, Directory))
+	return isinstance(obj, Directory)
+
+def isfile(obj):
+	assert isinstance(obj, (File, Directory))
+	return isinstance(obj, File)
 
 class JemfShell(CommandInterpreter):
 	def __init__(self, jemf, args):
@@ -307,7 +293,7 @@ class JemfShell(CommandInterpreter):
 
 		if len(l) == 1 and l[0] == orig_text:
 			obj = self.fs.lookup_path(text)
-			suffix = os.sep if fsobjtype(obj) == DIRECTORY else " "
+			suffix = os.sep if isdir(obj) else " "
 			return [orig_text + suffix]
 		else:
 			return l
@@ -456,7 +442,7 @@ class Jemf(object):
 			parent = root
 			tgtcomp = os.path.curdir
 
-		if fsobjtype(parent) != DIRECTORY:
+		if not isdir(parent):
 			error("'%s' is not a directory" % os.path.join(*parentcomps))
 
 		if should_exist is not None:
@@ -595,7 +581,7 @@ class Jemf(object):
 	def edit(self, args):
 		"""edit an existing file"""
 		parent, tgtname = self.lookup_for_edit(args.path, should_exist=True)
-		if fsobjtype(parent[tgtname]) != FILE:
+		if not isfile(parent[tgtname]):
 			error("'%s' is not a file" % args.path)
 
 		if args.generate is None:
@@ -612,7 +598,7 @@ class Jemf(object):
 		obj = curparent[objname]
 		topath = args.topath
 		newparent, newobjname = self.lookup_for_edit(topath, should_exist=None)
-		if newobjname in newparent and fsobjtype(newparent[newobjname]) == DIRECTORY:
+		if newobjname in newparent and isdir(newparent[newobjname]):
 			newparent = newparent[newobjname]
 			newobjname = objname
 			topath = os.path.join(args.topath, objname)
@@ -627,7 +613,7 @@ class Jemf(object):
 			existing = newparent[newobjname]
 			if not args.force:
 				error("'%s' exists (user '-f' to overwrite)" % topath)
-			elif fsobjtype(existing) == DIRECTORY and len(existing) > 0:
+			elif isdir(existing) and len(existing) > 0:
 				error("'%s' is not empty" % topath)
 
 		newparent[newobjname] = obj
@@ -642,7 +628,7 @@ class Jemf(object):
 		obj = parent[tgtname]
 		if obj is self.data:
 			error("can't delete '%s'" % os.sep)
-		elif fsobjtype(obj) == DIRECTORY and len(obj) > 0 and not args.recursive:
+		elif isdir(obj) and len(obj) > 0 and not args.recursive:
 			error("'%s' is not empty" % args.path)
 		else:
 			del parent[tgtname]
@@ -652,11 +638,8 @@ class Jemf(object):
 	def cat(self, args):
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
-		t = fsobjtype(item)
-		if t == DIRECTORY:
+		if isdir(item):
 			error("'%s' is a directory" % args.path)
-		elif t != FILE:
-			raise MistypedObject(args.path, item)
 		self.output_secret(item, args.force)
 
 	@reader([mk_path_arg("starting directory (default: .)", opt=True)])
@@ -675,13 +658,11 @@ class Jemf(object):
 		else:
 			obj = self.cwd
 
-		if fsobjtype(obj) == FILE:
+		if isfile(obj):
 			sys.stdout.write(args.path + '\n')
-		elif fsobjtype(obj) == DIRECTORY:
-			for n, o in sorted(obj.items()):
-				sys.stdout.write("%s%s\n" % (n, os.sep if fsobjtype(o) == DIRECTORY else ""))
 		else:
-			raise MistypedObject(args.path, obj)
+			for n, o in sorted(obj.items()):
+				sys.stdout.write("%s%s\n" % (n, os.sep if isdir(o) else ""))
 
 	if debugmode:
 		@reader([(("-m", "--metadata"), dict(action="store_const", dest="kind",
