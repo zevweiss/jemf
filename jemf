@@ -585,9 +585,9 @@ class Jemf(object):
 		"""create a new file"""
 		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
 		if args.generate is None:
-			parent[newname] = confirmed_getpass("data for %s" % args.path)
+			parent[newname] = File(confirmed_getpass("data for %s" % args.path))
 		else:
-			parent[newname] = generate_data(args.generate)
+			parent[newname] = File(generate_data(args.generate))
 
 	@writer([_generate_arg, mk_path_arg("the file to edit")],
 		parser_kwargs=dict(epilog=gen_constraints_desc,
@@ -599,9 +599,9 @@ class Jemf(object):
 			error("'%s' is not a file" % args.path)
 
 		if args.generate is None:
-			parent[tgtname] = confirmed_getpass("new data for %s" % args.path)
+			parent[tgtname] = File(confirmed_getpass("new data for %s" % args.path))
 		else:
-			parent[tgtname] = generate_data(args.generate)
+			parent[tgtname] = File(generate_data(args.generate))
 
 	@writer([mk_force_arg("overwrite an existing file"),
 		 (("frompath",), dict(metavar="FROM", help="current path/name")),
