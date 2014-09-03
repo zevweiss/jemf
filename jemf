@@ -345,6 +345,9 @@ def mk_path_arg(desc, opt=False):
 		d["nargs"] = '?'
 	return (("path",), d)
 
+def mk_force_arg(desc):
+	return (("-f", "--force"), dict(help=desc, action="store_true"))
+
 class Jemf(object):
 	def __init__(self, filename, password):
 		self.filename = filename
@@ -380,9 +383,12 @@ class Jemf(object):
 			raise CorruptFS("data/metadata not found")
 		return fs
 
-	def output_secret(self, s):
+	def output_secret(self, s, force):
 		if self.pipe_to is None:
-			print(s, end='')
+			if sys.stdout.isatty() and not force:
+				error("won't print to terminal without '-f'")
+			else:
+				print(s, end='\n' if sys.stdout.isatty() else '')
 		else:
 			proc = subprocess.Popen(self.pipe_to, shell=True, stdin=subprocess.PIPE)
 			proc.communicate(str.encode(s, "utf-8"))
@@ -531,10 +537,8 @@ class Jemf(object):
 
 	_generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
 						    help="auto-generate entry data"))
-	_force_arg = (("-f", "--force"), dict(help="overwriting an existing file",
-					      action="store_true"))
 
-	@writer([_force_arg], batch_only=True)
+	@writer([mk_force_arg("overwrite an existing file")], batch_only=True)
 	def mkfs(self, args):
 		"""initialize a new jemf FS"""
 		self.data = Directory(None)
@@ -599,7 +603,7 @@ class Jemf(object):
 		else:
 			parent[tgtname] = generate_data(args.generate)
 
-	@writer([_force_arg,
+	@writer([mk_force_arg("overwrite an existing file"),
 		 (("frompath",), dict(metavar="FROM", help="current path/name")),
 		 (("topath",), dict(metavar="TO", help="new path/name"))])
 	def mv(self, args):
@@ -644,8 +648,7 @@ class Jemf(object):
 			del parent[tgtname]
 
 	@reader([mk_path_arg("the file to print"),
-		 (("-f", "--force"), dict(help="disable anti-tty-print interlock",
-					  action="store_true"))])
+		 mk_force_arg("disable anti-tty-print interlock")])
 	def cat(self, args):
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
@@ -654,13 +657,7 @@ class Jemf(object):
 			error("'%s' is a directory" % args.path)
 		elif t != FILE:
 			raise MistypedObject(args.path, item)
-		if self.pipe_to is None and sys.stdout.isatty():
-			if not args.force:
-				error("won't print to terminal without '-f'")
-			suffix = '\n'
-		else:
-			suffix = ''
-		self.output_secret(item + suffix)
+		self.output_secret(item, args.force)
 
 	@reader([mk_path_arg("starting directory (default: .)", opt=True)])
 	def find(self, args):
@@ -690,7 +687,8 @@ class Jemf(object):
 		@reader([(("-m", "--metadata"), dict(action="store_const", dest="kind",
 						     const="metadata", help="dump only metadata")),
 			 (("-d", "--data"), dict(action="store_const", dest="kind",
-						 const="data", help="dump only data"))])
+						 const="data", help="dump only data")),
+			 mk_force_arg("disable anti-tty-print interlock")])
 		def dump(self, args):
 			"""dump plaintext JSON"""
 			if args.kind == "data":
@@ -699,7 +697,7 @@ class Jemf(object):
 				s = pretty_json_dump(self.metadata)
 			else:
 				s = self._to_json()
-			self.output_secret(s)
+			self.output_secret(s, args.force)
 
 	@reader([(("-p", "--pipe-to"), dict(metavar="CMD", type=str, default=None,
 					    help="shell command to pipe output to for commands"
