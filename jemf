@@ -35,6 +35,8 @@ except ImportError:
 default_fspaths = [os.path.expanduser(p) for p in ["~/.config/jemf", "~/.jemf"]]
 gpgcmd = "gpg"
 
+debugmode = os.getenv("JEMF_DEBUG") is not None
+
 # Python 2/3 compat stuff
 if hasattr(os, "pipe2"):
 	pipe = lambda: os.pipe2(0)
@@ -684,19 +686,20 @@ class Jemf(object):
 		else:
 			raise MistypedObject(args.path, obj)
 
-	@reader([(("-m", "--metadata"), dict(action="store_const", dest="kind",
-					     const="metadata", help="dump only metadata")),
-		 (("-d", "--data"), dict(action="store_const", dest="kind",
-					 const="data", help="dump only data"))])
-	def dump(self, args):
-		"""dump plaintext JSON"""
-		if args.kind == "data":
-			s = pretty_json_dump(self.data)
-		elif args.kind == "metadata":
-			s = pretty_json_dump(self.metadata)
-		else:
-			s = self._to_json()
-		self.output_secret(s)
+	if debugmode:
+		@reader([(("-m", "--metadata"), dict(action="store_const", dest="kind",
+						     const="metadata", help="dump only metadata")),
+			 (("-d", "--data"), dict(action="store_const", dest="kind",
+						 const="data", help="dump only data"))])
+		def dump(self, args):
+			"""dump plaintext JSON"""
+			if args.kind == "data":
+				s = pretty_json_dump(self.data)
+			elif args.kind == "metadata":
+				s = pretty_json_dump(self.metadata)
+			else:
+				s = self._to_json()
+			self.output_secret(s)
 
 	@reader([(("-p", "--pipe-to"), dict(metavar="CMD", type=str, default=None,
 					    help="shell command to pipe output to for commands"
