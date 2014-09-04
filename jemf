@@ -715,7 +715,14 @@ def open_jemf_fs(args):
 def new_jemf_fs(args):
 	if os.path.exists(args.fsfile) and not args.force:
 		error("%s exists (use -f to force reinitialization)" % args.fsfile)
-	password = confirmed_getpass("password for new jemf FS (%s)" % args.fsfile)
+
+	# It'd be nice if python had a do-while loop...
+	password = ""
+	while password == "":
+		password = confirmed_getpass("password for new jemf FS (%s)" % args.fsfile)
+		if password == "":
+			errprint("Empty password not allowed.")
+
 	return Jemf(args.fsfile, password)
 
 if __name__ == "__main__":
