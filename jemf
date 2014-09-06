@@ -387,6 +387,7 @@ class Jemf(object):
 
 	def _write_out(self):
 		self.metadata["last_modification_time"] = time.time()
+		self.metadata["last_modification_tzname"] = time.tzname[time.daylight]
 		self.metadata["last_modification_host"] = socket.gethostbyaddr(socket.gethostname())[0]
 		jemf_buf = str.encode(self._to_json(), "utf-8") + b'\n'
 
