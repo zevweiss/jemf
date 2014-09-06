@@ -380,7 +380,7 @@ class Jemf(object):
 			proc.communicate(str.encode(s, "utf-8"))
 			status = proc.wait()
 			if status != 0:
-				errprint("'%s' exited with status %d", self.pipe_to, status)
+				errprint("'%s' exited with status %d" % (self.pipe_to, status))
 			else:
 				# might stderr be more appropriate here?
 				print("[sent output to '%s']" % self.pipe_to)
