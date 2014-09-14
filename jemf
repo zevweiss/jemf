@@ -1,10 +1,12 @@
 #!/usr/bin/python
 
-# jemf: a jeneric (?), encrypted mini-filesystem
 #
-# (a command-line password manager).
+# jemf: an encrypted mini-filesystem.
 #
-# Stores data in a gpg-encrypted JSON file.
+# (command-line password manager)
+#
+# Copyright (c) 2014, Zev Weiss <zev@bewilderbeest.net>
+#
 
 from __future__ import print_function
 
