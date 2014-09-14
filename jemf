@@ -149,19 +149,21 @@ override these constraints.
 Stupid-site example: L8:C2:m2:N2:P0 for an 8-character purely
 alphanumeric (but mixed-case) entry.""" % default_constraints
 
-def constraints_to_dict(cstr):
-	d = {}
-	for c in cstr.split(":"):
-		if c != "":
-			d[c[0]] = int(c[1:])
-	return d
-
 char_classes = {
 	'C': "ABCDEFGHIJKLMNOPQRSTUVWXYZ", # uppercase
 	'm': "abcdefghijklmnopqrstuvwxyz", # lowercase
 	'N': "0123456789", # digits
 	'P': "!@#$%^&*:._-=+", # punctuation
 }
+
+def constraints_to_dict(cstr):
+	d = {}
+	for c in cstr.split(":"):
+		if c != "":
+			if c[0] not in char_classes and c[0] != 'L':
+				error("invalid constraint type: '%c'" % c[0])
+			d[c[0]] = int(c[1:])
+	return d
 
 def generate_data(constraints):
 	cdict = constraints_to_dict(default_constraints)
