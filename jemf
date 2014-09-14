@@ -710,6 +710,8 @@ class Jemf(object):
 		self.pipe_to = orig_pipe_to
 
 def open_jemf_fs(args):
+	if not os.path.exists(args.fsfile):
+		error("'%s' does not exist" % args.fsfile)
 	password = getpass.getpass("Enter password for %s: " % args.fsfile)
 	return Jemf.load_from_path(args.fsfile, password)
 
