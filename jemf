@@ -280,14 +280,10 @@ class JemfShell(CommandInterpreter):
 		l = []
 		for name in pdir:
 			if name.startswith(pfx):
-				l.append(base + name)
+				suffix = os.sep if isdir(pdir[name]) else " "
+				l.append(base + name + suffix)
 
-		if len(l) == 1 and l[0] == orig_text:
-			obj = self.fs.lookup_path(text)
-			suffix = os.sep if isdir(obj) else " "
-			return [orig_text + suffix]
-		else:
-			return l
+		return l
 
 	@classmethod
 	def _add_cmd_handler(cls, cmd):
