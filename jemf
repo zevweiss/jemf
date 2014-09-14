@@ -156,33 +156,22 @@ def constraints_to_dict(cstr):
 			d[c[0]] = int(c[1:])
 	return d
 
-uppers = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-lowers = "abcdefghijklmnopqrstuvwxyz"
-digits = "0123456789"
-punctuation = "!@#$%^&*:._-=+"
+char_classes = {
+	'C': "ABCDEFGHIJKLMNOPQRSTUVWXYZ", # uppercase
+	'm': "abcdefghijklmnopqrstuvwxyz", # lowercase
+	'N': "0123456789", # digits
+	'P': "!@#$%^&*:._-=+", # punctuation
+}
 
 def generate_data(constraints):
 	cdict = constraints_to_dict(default_constraints)
 	cdict.update(constraints_to_dict(constraints))
-	s = ""
-	for _ in range(0, cdict['C']):
-		s += random.choice(uppers)
-	for _ in range(0, cdict['m']):
-		s += random.choice(lowers)
-	for _ in range(0, cdict['N']):
-		s += random.choice(digits)
-	for _ in range(0, cdict['P']):
-		s += random.choice(punctuation)
-
-	padchars = ""
-	if cdict['C'] > 0:
-		padchars += uppers
-	if cdict['m'] > 0:
-		padchars += lowers
-	if cdict['N'] > 0:
-		padchars += digits
-	if cdict['P'] > 0:
-		padchars += punctuation
+	s, padchars = "", ""
+	for c, chars in char_classes.items():
+		for _ in range(0, cdict[c]):
+			s += random.choice(chars)
+		if cdict[c] > 0:
+			padchars += chars
 
 	# fill remaining space from pad character sets
 	for _ in range(0, cdict['L']-len(s)):
