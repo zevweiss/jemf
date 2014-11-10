@@ -323,9 +323,6 @@ def mk_path_arg(desc, opt=False):
 		d["nargs"] = '?'
 	return (("path",), d)
 
-def mk_force_arg(desc):
-	return (("-f", "--force"), dict(help=desc, action="store_true"))
-
 class Jemf(object):
 	def __init__(self, filename, password):
 		self.filename = filename
@@ -514,10 +511,15 @@ class Jemf(object):
 			return inner_decorator(fn, cmd_args=cmd_args, **kwargs)
 		return rd_dec
 
-	_generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
-						    help="auto-generate entry data"))
+	# some common flags
+	generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
+						   help="auto-generate entry data"))
+	force_print_arg = (("-f", "--force"), dict(help="disable anti-tty-print interlock",
+						   action="store_true"))
+	force_overwrite_arg = (("-f", "--force"), dict(help="overwrite an existing file",
+						       action="store_true"))
 
-	@writer([mk_force_arg("overwrite an existing file")], batch_only=True)
+	@writer([force_overwrite_arg], batch_only=True)
 	def mkfs(self, args):
 		"""initialize a new jemf FS"""
 		self.data = Directory(None)
@@ -557,7 +559,7 @@ class Jemf(object):
 		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
 		parent[newname] = Directory(parent)
 
-	@writer([_generate_arg, mk_path_arg("the file to create")],
+	@writer([generate_arg, mk_path_arg("the file to create")],
 		parser_kwargs=dict(epilog=gen_constraints_desc,
 				   formatter_class=argparse.RawDescriptionHelpFormatter))
 	def create(self, args):
@@ -568,7 +570,7 @@ class Jemf(object):
 		else:
 			parent[newname] = File(generate_data(args.generate))
 
-	@writer([_generate_arg, mk_path_arg("the file to edit")],
+	@writer([generate_arg, mk_path_arg("the file to edit")],
 		parser_kwargs=dict(epilog=gen_constraints_desc,
 				   formatter_class=argparse.RawDescriptionHelpFormatter))
 	def edit(self, args):
@@ -582,7 +584,7 @@ class Jemf(object):
 		else:
 			parent[tgtname] = File(generate_data(args.generate))
 
-	@writer([mk_force_arg("overwrite an existing file"),
+	@writer([force_overwrite_arg,
 		 (("frompath",), dict(metavar="FROM", help="current path/name")),
 		 (("topath",), dict(metavar="TO", help="new path/name"))])
 	def mv(self, args):
@@ -626,8 +628,7 @@ class Jemf(object):
 		else:
 			del parent[tgtname]
 
-	@reader([mk_path_arg("the file to print"),
-		 mk_force_arg("disable anti-tty-print interlock")])
+	@reader([mk_path_arg("the file to print"), force_print_arg])
 	def cat(self, args):
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
@@ -663,7 +664,7 @@ class Jemf(object):
 						     const="metadata", help="dump only metadata")),
 			 (("-d", "--data"), dict(action="store_const", dest="kind",
 						 const="data", help="dump only data")),
-			 mk_force_arg("disable anti-tty-print interlock")])
+			 force_print_arg])
 		def dump(self, args):
 			"""dump plaintext JSON"""
 			if args.kind == "data":
@@ -694,7 +695,7 @@ class Jemf(object):
 			assert out[-1] == '\n'
 			return out[:-1]
 
-	@reader([mk_force_arg("disable anti-tty-print interlock")])
+	@reader([force_print_arg])
 	def menu(self, args):
 		"""print a file selected from a menu (requires `dmenu')"""
 		paths = recursive_list(self.cwd, os.path.curdir, fileonly=True)
