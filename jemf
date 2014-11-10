@@ -299,7 +299,7 @@ class JemfShell(CommandInterpreter):
 		return
 
 	def default(self, line):
-		errprint("Unrecognized command: %s\n(see 'help')\n(see 'help')" % line.split()[0])
+		errprint("Unrecognized command: %s\n(see 'help')" % line.split()[0])
 
 	def completedefault(self, orig_text, line, beg, end):
 		try:
