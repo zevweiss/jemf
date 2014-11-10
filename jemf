@@ -12,7 +12,7 @@ from __future__ import print_function
 
 import sys
 import argparse
-import getpass
+from getpass import getpass as getpass_tty
 import subprocess
 import json
 import os
@@ -63,8 +63,23 @@ class InternalError(Exception):
 class CorruptFS(Exception):
 	pass
 
-def errprint(*args, **kwargs):
-	print(*args, file=sys.stderr, **kwargs)
+def errprint_tty(msg):
+	if msg != '' and msg[-1] != '\n':
+		msg += '\n'
+	print(msg, end='', file=sys.stderr)
+
+zenity_args = ["zenity", "--title", "jemf"]
+
+def errprint_gui(msg):
+	errprogs = [zenity_args + ["--error", "--text"], ["gxmessage"], ["xmessage"]]
+	for ep in errprogs:
+		try:
+			subprocess.call(ep + [msg])
+			return
+		except:
+			pass
+	print("(None of %s succeeded)" % [ep[0] for ep in errprogs], file=sys.stderr)
+	errprint_tty(msg)
 
 def error(msg):
 	raise UserError("Error: %s" % msg)
@@ -72,9 +87,23 @@ def error(msg):
 def internal_error(msg):
 	raise InternalError("Internal error: %s" % msg)
 
+def getpass_gui(prompt):
+	progs = [["ssh-askpass"], zenity_args + ["--entry", "--hide-text", "--text"]]
+	for p in progs:
+		try:
+			output = subprocess.check_output(p + [prompt])
+			assert output[-1] == '\n'
+			return output[:-1]
+		except:
+			pass
+	error("None of %s succeeded" % [p[0] for p in progs])
+
+getpass = getpass_tty
+errprint = errprint_tty
+
 def confirmed_getpass(label):
-	pass1 = getpass.getpass("Enter %s: " % label)
-	pass2 = getpass.getpass("Confirm %s: " % label)
+	pass1 = getpass("Enter %s: " % label)
+	pass2 = getpass("Confirm %s: " % label)
 	if pass1 != pass2:
 		error("input mismatch")
 	else:
@@ -101,7 +130,8 @@ def run_gpg(args, passwd, stdin_data=None):
 	try:
 		# close write end of passphrase pipe in child process
 		proc = subprocess.Popen(cmdargs, stdout=subprocess.PIPE, stdin=subprocess.PIPE,
-					close_fds=False, preexec_fn=pw_w.close)
+					stderr=subprocess.PIPE, close_fds=False,
+					preexec_fn=pw_w.close)
 	except OSError as ose:
 		if ose.errno == errno.ENOENT:
 			raise UserError("Error attempting to execute %s: %s"
@@ -118,10 +148,11 @@ def run_gpg(args, passwd, stdin_data=None):
 	pw_w.flush()
 	pw_w.close()
 
-	stdout_data, _ = proc.communicate(stdin_data)
+	stdout_data, stderr_data = proc.communicate(stdin_data)
 
 	retval = proc.wait()
 	if retval != 0:
+		errprint(stderr_data)
 		raise subprocess.CalledProcessError(retval, cmdargs)
 
 	return stdout_data
@@ -268,8 +299,7 @@ class JemfShell(CommandInterpreter):
 		return
 
 	def default(self, line):
-		errprint("Unrecognized command: %s" % line.split()[0])
-		errprint("(see 'help')")
+		errprint("Unrecognized command: %s\n(see 'help')\n(see 'help')" % line.split()[0])
 
 	def completedefault(self, orig_text, line, beg, end):
 		try:
@@ -703,7 +733,7 @@ class Jemf(object):
 		paths = recursive_list(self.cwd, os.path.curdir, fileonly=True)
 		selected = self._menu_select(paths)
 		if selected is None:
-			errprint("Nothing selected\n")
+			print("(Nothing selected.)", file=sys.stderr)
 			exit(1)
 		item = self.lookup_path(selected)
 		assert isfile(item)
@@ -740,7 +770,7 @@ class Jemf(object):
 def open_jemf_fs(args):
 	if not os.path.exists(args.fsfile):
 		error("'%s' does not exist" % args.fsfile)
-	password = getpass.getpass("Enter password for %s: " % args.fsfile)
+	password = getpass("Enter password for %s: " % args.fsfile)
 	return Jemf.load_from_path(args.fsfile, password)
 
 def new_jemf_fs(args):
@@ -762,6 +792,9 @@ def main():
 					     " variable JEMF_FSFILE")
 
 	mainparser.add_argument("-f", "--fsfile", type=str, help="jemf FS file to use")
+	mainparser.add_argument("-X", "--gui", action="store_true",
+				help="Use GUI sub-programs for password input and status output"
+				     " (ssh-askpass and zenity/[g]xmessage)")
 
 	subparsers = mainparser.add_subparsers(metavar="COMMAND", title=None)
 
@@ -773,6 +806,11 @@ def main():
 			cmd.create_parser()
 
 	args = mainparser.parse_args()
+
+	if args.gui:
+		global getpass, errprint
+		getpass = getpass_gui
+		errprint = errprint_gui
 
 	if args.fsfile is None:
 		for p in [os.getenv("JEMF_FSFILE"), find_fs()]:
@@ -804,7 +842,7 @@ if __name__ == "__main__":
 		main()
 	except subprocess.CalledProcessError as cpe:
 		cmdname = cpe.cmd[0] if type(cpe.cmd) is list else cpe.cmd.split()[0]
-		errprint("%s exited with status %d" % (cmdname, cpe.returncode))
+		print("%s exited with status %d" % (cmdname, cpe.returncode), file=sys.stderr)
 		exit(1)
 	except UserError as ue:
 		if ue.args[0]:
