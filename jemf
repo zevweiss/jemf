@@ -185,11 +185,14 @@ def generate_data(constraints):
 	random.shuffle(l)
 	return ''.join(l[:cdict['L']])
 
-def recursive_list(obj, pfx):
-	sys.stdout.write("%s\n" % pfx)
+def recursive_list(obj, pfx, fileonly=False):
+	l = []
+	if not fileonly or isfile(obj):
+		l.append(pfx)
 	if isdir(obj):
 		for n, o in obj.items():
-			recursive_list(o, os.path.join(pfx, n))
+			l += recursive_list(o, os.path.join(pfx, n), fileonly=fileonly)
+	return l
 
 class File(str):
 	pass
@@ -636,9 +639,10 @@ class Jemf(object):
 	def find(self, args):
 		"""recursively list files and directories"""
 		if args.path is None:
-			recursive_list(self.cwd, os.path.curdir)
+			paths = recursive_list(self.cwd, os.path.curdir)
 		else:
-			recursive_list(self.lookup_path(args.path), args.path)
+			paths = recursive_list(self.lookup_path(args.path), args.path)
+		sys.stdout.write('\n'.join(paths) + '\n')
 
 	@reader([mk_path_arg("file or directory to list (default: .)", opt=True)])
 	def ls(self, args):
@@ -669,6 +673,38 @@ class Jemf(object):
 			else:
 				s = self._to_json()
 			self.output_secret(s, args.force)
+
+	def _menu_select(self, items):
+		argv = ["dmenu", "-i", "-b", "-l", "20", "-p", self.filename,
+			"-nb", "#600", "-nf", "white", "-sb", "white", "-sf", "black"]
+		try:
+			proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stdin=subprocess.PIPE)
+		except OSError as ose:
+			if ose.errno == errno.ENOENT:
+				raise UserError("Error attempting to execute %s: %s"
+						% (argv[0], ose.strerror))
+			else:
+				raise
+
+		out, _ = proc.communicate('\n'.join(items) + '\n')
+		retval = proc.wait()
+		if retval != 0 or out == '':
+			return None
+		else:
+			assert out[-1] == '\n'
+			return out[:-1]
+
+	@reader([mk_force_arg("disable anti-tty-print interlock")])
+	def menu(self, args):
+		"""print a file selected from a menu (requires `dmenu')"""
+		paths = recursive_list(self.cwd, os.path.curdir, fileonly=True)
+		selected = self._menu_select(paths)
+		if selected is None:
+			errprint("Nothing selected\n")
+			exit(1)
+		item = self.lookup_path(selected)
+		assert isfile(item)
+		self.output_secret(item, args.force)
 
 	@reader([(("-p", "--pipe-to"), dict(metavar="CMD", type=str, default=None,
 					    help="shell command to pipe output to for commands"
