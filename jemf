@@ -89,6 +89,10 @@ def find_fs():
 def pretty_json_dump(d):
 	return json.dumps(d, sort_keys=True, indent=4, separators=(',', ': '))
 
+def check_tty_print_interlock(force):
+	if not force and sys.stdout.isatty():
+		error("won't print to terminal without '-f'")
+
 def run_gpg(args, passwd, stdin_data=None):
 	pw_r, pw_w = pipe()
 	pw_w = os.fdopen(pw_w, "w")
@@ -360,10 +364,8 @@ class Jemf(object):
 
 	def output_secret(self, s, force):
 		if self.pipe_to is None:
-			if sys.stdout.isatty() and not force:
-				error("won't print to terminal without '-f'")
-			else:
-				print(s, end='\n' if sys.stdout.isatty() else '')
+			check_tty_print_interlock(force)
+			print(s, end='\n' if sys.stdout.isatty() else '')
 		else:
 			proc = subprocess.Popen(self.pipe_to, shell=True, stdin=subprocess.PIPE)
 			proc.communicate(str.encode(s, "utf-8"))
@@ -754,7 +756,7 @@ def new_jemf_fs(args):
 
 	return Jemf(args.fsfile, password)
 
-if __name__ == "__main__":
+def main():
 	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem",
 					     epilog="FS file can also be specified with the environment"
 					     " variable JEMF_FSFILE")
@@ -781,15 +783,25 @@ if __name__ == "__main__":
 	# matching by name here is kind of ugly...
 	doing_mkfs = args.action.name == "mkfs"
 
+	# Early check for things that might print secrets to stdout
+	# (to avoid the annoyance of entering your passphrase only to
+	# then find out that you forgot a flag and now have to do it
+	# over again).
+	if Jemf.force_print_arg in args.action.cmd_args:
+		check_tty_print_interlock(args.force)
+
 	if args.fsfile is None:
 		if doing_mkfs:
 			args.fsfile = default_fspaths[0]
 		else:
 			error("no jemf FS found or specified")
 
+	ctor = new_jemf_fs if doing_mkfs else open_jemf_fs
+	args.action(ctor(args), args)
+
+if __name__ == "__main__":
 	try:
-		ctor = new_jemf_fs if doing_mkfs else open_jemf_fs
-		args.action(ctor(args), args)
+		main()
 	except subprocess.CalledProcessError as cpe:
 		cmdname = cpe.cmd[0] if type(cpe.cmd) is list else cpe.cmd.split()[0]
 		errprint("%s exited with status %d" % (cmdname, cpe.returncode))
