@@ -90,12 +90,12 @@ def internal_error(msg):
 def getpass_gui(prompt):
 	progs = [["ssh-askpass"], zenity_args + ["--entry", "--hide-text", "--text"]]
 	for p in progs:
-		try:
-			output = subprocess.check_output(p + [prompt])
+		p = subprocess.Popen(p + [prompt], stdout=subprocess.PIPE)
+		output = p.communicate()[0]
+		if p.wait() == 0:
 			assert output[-1] == '\n'
 			return output[:-1]
-		except:
-			pass
+
 	error("None of %s succeeded" % [p[0] for p in progs])
 
 getpass = getpass_tty
