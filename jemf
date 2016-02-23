@@ -731,7 +731,7 @@ class Jemf(object):
 	def menu(self, args):
 		"""print a file selected from a menu (requires `dmenu')"""
 		paths = recursive_list(self.cwd, os.path.curdir, fileonly=True)
-		selected = self._menu_select(paths)
+		selected = self._menu_select(sorted(paths))
 		if selected is None:
 			print("(Nothing selected.)", file=sys.stderr)
 			exit(1)
