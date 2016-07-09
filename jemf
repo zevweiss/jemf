@@ -333,6 +333,8 @@ class JemfShell(CommandInterpreter):
 				if exc.args[0]:
 					errprint(exc.args[0])
 				return
+			except HelpFlagPassed:
+				return
 			# merge in original self.args if not overridden
 			for k,v in self.args.__dict__.items():
 				if k not in args:
@@ -344,6 +346,20 @@ class JemfShell(CommandInterpreter):
 					errprint(ue.args[0])
 		cmdfun.__doc__ = cmd.parser.format_help()
 		setattr(cls, "do_%s" % cmd.name, cmdfun)
+
+
+# For throwing when a -h/--help flag is passed, so that a caller N levels up can
+# either skip executing the command (in shell mode) or just exit cleanly (in
+# batch mode).
+class HelpFlagPassed(Exception):
+	pass
+
+# Custom help action that doesn't unconditionally exit (which we don't want in
+# shell mode).
+class JemfHelpAction(argparse.Action):
+	def __call__(self, parser, namespace, values, option_string=None):
+		parser.print_help()
+		raise HelpFlagPassed()
 
 def mk_raise_usage_error(usage):
 	usg = usage.strip()
@@ -499,10 +515,16 @@ class Jemf(object):
 		@method
 		def add_to(self, subparsers):
 			self.parser = subparsers.add_parser(self.name, description=self.desc,
-							    help=self.desc, **self.parser_kwargs)
+							    help=self.desc, add_help=False, **self.parser_kwargs)
 			self.parser.set_defaults(action=self)
 			for a in self.cmd_args:
 				self.parser.add_argument(*a[0], **a[1])
+
+			# Custom help argument that doesn't unconditionally exit
+			# (so that we can avoid exiting when --help is passed to
+			# a command in shell mode).
+			self.parser.add_argument('-h', "--help", action=JemfHelpAction, default=argparse.SUPPRESS,
+						 nargs=0, help="show this help message")
 
 		@method
 		def create_parser(self):
@@ -809,7 +831,10 @@ def main():
 		else:
 			cmd.create_parser()
 
-	args = mainparser.parse_args()
+	try:
+		args = mainparser.parse_args()
+	except HelpFlagPassed:
+		exit(0)
 
 	if args.gui:
 		global getpass, errprint
