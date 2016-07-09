@@ -416,8 +416,8 @@ class Jemf(object):
 		# the  directory in which the pointed-to file resides
 		filename = os.path.realpath(self.filename)
 
-		tmpfd, tmppath = tempfile.mkstemp(prefix=os.path.basename(filename),
-						  dir=os.path.dirname(filename))
+		dirpath = os.path.dirname(filename)
+		tmpfd, tmppath = tempfile.mkstemp(prefix=os.path.basename(filename), dir=dirpath)
 
 		output = run_gpg(["-c", "--yes", "-o", tmppath], self.password, jemf_buf)
 		if output != b'':
@@ -428,7 +428,11 @@ class Jemf(object):
 		os.close(tmpfd)
 
 		os.rename(tmppath, filename)
-		# FIXME: fsync directory? python stdlib doesn't seem to have opendir()...
+
+		# fsync the containing directory to persist the rename
+		dirfd = os.open(dirpath, os.O_RDONLY)
+		os.fsync(dirfd)
+		os.close(dirfd)
 
 	def _lookup_comps(self, root, comps, noexc=False):
 		fsdir = root
