@@ -157,6 +157,13 @@ def run_gpg(args, passwd, stdin_data=None):
 
 	return stdout_data
 
+hostname = None
+def get_hostname():
+	global hostname
+	if hostname is None:
+		hostname = socket.gethostbyaddr(socket.gethostname())[0]
+	return hostname
+
 def path_components(path):
 	np = os.path.normpath(path)
 	while len(np) > 0 and np[0] == os.sep:
@@ -425,7 +432,7 @@ class Jemf(object):
 	def _write_out(self):
 		self.metadata["last_modification_time"] = time.time()
 		self.metadata["last_modification_tzname"] = time.tzname[time.daylight]
-		self.metadata["last_modification_host"] = socket.gethostbyaddr(socket.gethostname())[0]
+		self.metadata["last_modification_host"] = get_hostname()
 		jemf_buf = str.encode(self._to_json(), "utf-8") + b'\n'
 
 		# If filename is a symlink, do the new file write & rename in
