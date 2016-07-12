@@ -117,8 +117,19 @@ def find_fs():
 			return p
 	return None
 
+class JemfJSONEncoder(json.JSONEncoder):
+	def default(self, obj):
+		if isinstance(obj, File):
+			if obj.metadata is not None:
+				return [obj.data, dict(mtime=obj.metadata.mtime,
+						       mtzname=obj.metadata.mtzname,
+						       mhost=obj.metadata.mhost)]
+			else:
+				return obj.data
+		return json.JSONEncoder.default(self, obj)
+
 def pretty_json_dump(d):
-	return json.dumps(d, sort_keys=True, indent=4, separators=(',', ': '))
+	return json.dumps(d, sort_keys=True, indent=4, separators=(',', ': '), cls=JemfJSONEncoder)
 
 def check_tty_print_interlock(force):
 	if not force and sys.stdout.isatty():
@@ -242,8 +253,39 @@ def recursive_list(obj, pfx, fileonly=False):
 			l += recursive_list(o, os.path.join(pfx, n), fileonly=fileonly)
 	return l
 
-class File(str):
-	pass
+class Metadata(object):
+	def __init__(self, mtime, mtzname, mhost):
+		self.mtime = mtime
+		self.mtzname = mtzname
+		self.mhost = mhost
+
+	@classmethod
+	def herenow(cls):
+		return cls(time.time(), time.tzname[time.daylight], get_hostname())
+
+	@classmethod
+	def valid_dict_encoding(cls, d):
+		return (isinstance(d, dict)
+			and all(k in obj[1] for k in ["mtime", "mtzname", "mhost"])
+			and isinstance(d["mtime"], float)
+			and all(isinstance(obj[1][k], strtypes) for k in ["mtzname", "mhost"]))
+
+class File(object):
+	def __init__(self, data):
+		self.data = data
+		self.metadata = Metadata.herenow()
+
+	@classmethod
+	def with_metadata(cls, data, mtime, mtzname, mhost):
+		f = cls(data)
+		f.metadata = Metadata(mtime, mtzname, mhost)
+		return f
+
+	@classmethod
+	def without_metadata(cls, data):
+		f = cls(data)
+		f.metadata = None
+		return f
 
 class Directory(dict):
 	def __init__(self, parent):
@@ -253,17 +295,34 @@ class Directory(dict):
 			assert type(parent) is Directory
 		self._specials = {os.path.curdir: self, os.path.pardir: parent}
 		self._dict = super(Directory, self)
+		self.metadata = None
 
 	@classmethod
 	def from_dict(cls, d, parent=None):
 		newdir = cls(parent)
 		for name, obj in d.items():
-			if isinstance(obj, dict):
+			if isinstance(obj, list):
+				if (not len(obj) == 2
+				    or not Metadata.valid_dict_encoding(obj[1]))
+					raise ValueError("invalid file (list) object")
+
+				mtime = obj[1]["mtime"]
+				mtzname = obj[1]["mtzname"]
+				mhost = obj[1]["mhost"]
+
+				if isinstance(obj[0], strtypes):
+					obj = File.with_metadata(obj[0], mtime, mtzname, mhost)
+				elif isinstance(obj[0], dict):
+					obj = cls.from_dict(obj[0], newdir)
+					obj.metadata = Metadata(mtime, mtzname, mhost)
+			elif isinstance(obj, dict):
+				# old-style directory, no metadata
 				obj = cls.from_dict(obj, newdir)
 			elif isinstance(obj, strtypes):
-				obj = File(obj)
+				# old-style file, no metadata
+				obj = File.without_metadata(obj)
 			else:
-				raise ValueError("non-dict, non-string object (%s)" % type(obj))
+				raise ValueError("Unexpected non-dict, non-string, non-list object (%s)" % type(obj))
 			newdir[name] = obj
 		return newdir
 
@@ -745,7 +804,7 @@ class Jemf(object):
 		item = self.lookup_path(args.path)
 		if isdir(item):
 			error("'%s' is a directory" % args.path)
-		self.output_secret(item, args.force)
+		self.output_secret(item.data, args.force)
 
 	@reader([mk_path_arg("starting directory (default: .)", opt=True)])
 	def find(self, args):
@@ -756,7 +815,10 @@ class Jemf(object):
 			paths = recursive_list(self.lookup_path(args.path), args.path)
 		sys.stdout.write('\n'.join(paths) + '\n')
 
-	@reader([mk_path_arg("file or directory to list (default: .)", opt=True)])
+	@reader([mk_path_arg("file or directory to list (default: .)", opt=True),
+		 (("-l", "--long"), dict(help="use long format", action="store_true")),
+		 (("-d", "--directory"), dict(help="list directories themselves, not their contents",
+					      action="store_true"))])
 	def ls(self, args):
 		"""list files and directories"""
 		if args.path is not None:
@@ -764,7 +826,7 @@ class Jemf(object):
 		else:
 			obj = self.cwd
 
-		if isfile(obj):
+		if isfile(obj) or args.directory:
 			sys.stdout.write(args.path + '\n')
 		else:
 			for n, o in sorted(obj.items()):
@@ -816,7 +878,7 @@ class Jemf(object):
 			exit(1)
 		item = self.lookup_path(selected)
 		assert isfile(item)
-		self.output_secret(item, args.force)
+		self.output_secret(item.data, args.force)
 
 	@reader([(("-p", "--pipe-to"), dict(metavar="CMD", type=str, default=None,
 					    help="shell command to pipe output to for commands"
