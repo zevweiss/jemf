@@ -609,7 +609,7 @@ class Jemf(object):
 		# dumb brute force...could introduce some extra
 		# machinery to make this more efficient.
 		def get_dirname(obj):
-			parent = obj[".."]
+			parent = obj[os.path.pardir]
 			if parent is obj:
 				return os.sep
 			for k, v in parent.items():
@@ -664,10 +664,10 @@ class Jemf(object):
 			topath = os.path.join(args.topath, objname)
 
 		p = newparent
-		while p[".."] is not p:
+		while p[os.path.pardir] is not p:
 			if p is obj:
 				error("can't move '%s' inside itself" % args.frompath)
-			p = p[".."]
+			p = p[os.path.pardir]
 
 		if newobjname in newparent:
 			existing = newparent[newobjname]
