@@ -286,11 +286,14 @@ def isfile(obj):
 	assert isinstance(obj, (File, Directory))
 	return isinstance(obj, File)
 
+ansi_red = "\x1b[31m"
+ansi_rst = "\x1b[m"
+
 class JemfShell(CommandInterpreter):
 	def __init__(self, jemf, args):
 		self.fs = jemf
 		self.args = args
-		self.prompt = "jemf[%s]> " % self.fs.filename if sys.stdin.isatty() else ""
+		self.prompt = "%sjemf[%s]> %s" % (ansi_red, self.fs.filename if sys.stdin.isatty() else "", ansi_rst)
 		CommandInterpreter.__init__(self)
 
 	def do_EOF(self, args):
