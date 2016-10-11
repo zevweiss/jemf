@@ -21,6 +21,7 @@ import errno
 import random
 import socket
 import time
+import signal
 import tempfile
 from cmd import Cmd as CommandInterpreter
 import shlex
@@ -290,10 +291,22 @@ ansi_red = "\x1b[31m"
 ansi_rst = "\x1b[m"
 
 class JemfShell(CommandInterpreter):
+
+	# Time out after 2 minutes waiting for input (can be
+	# overridden via JEMF_TMOUT environment variable)
+	input_timeout = 120
+
 	def __init__(self, jemf, args):
 		self.fs = jemf
 		self.args = args
 		self.prompt = "%sjemf[%s]> %s" % (ansi_red, self.fs.filename if sys.stdin.isatty() else "", ansi_rst)
+		tmout = os.getenv("JEMF_TMOUT")
+		if tmout:
+			try:
+				self.input_timeout = int(tmout)
+			except ValueError:
+				errprint("JEMF_TMOUT value not a valid base-10 integer, retaining default (%d)"
+					 % self.input_timeout)
 		CommandInterpreter.__init__(self)
 
 	def do_EOF(self, args):
@@ -302,7 +315,21 @@ class JemfShell(CommandInterpreter):
 			sys.stdout.write('\n')
 		return True
 
+	def set_input_timeout_alarm(self):
+		if self.input_timeout <= 0:
+			return
+		def alrm_handler(signum, frame):
+			errprint("Input timeout exceeded; exiting.\n")
+			sys.exit(1)
+		signal.signal(signal.SIGALRM, alrm_handler)
+		signal.alarm(self.input_timeout)
+
+	def preloop(self):
+		self.set_input_timeout_alarm()
+
 	def postcmd(self, stop, line):
+		if not stop:
+			self.set_input_timeout_alarm()
 		return stop
 
 	# This is defined to override default "repeat previous
