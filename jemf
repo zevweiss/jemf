@@ -22,6 +22,7 @@ import random
 import socket
 import time
 import signal
+import curses
 import tempfile
 from cmd import Cmd as CommandInterpreter
 import shlex
@@ -290,6 +291,14 @@ def isfile(obj):
 ansi_red = "\x1b[31m"
 ansi_rst = "\x1b[m"
 
+def clear_terminal():
+	curses.setupterm()
+	e3 = curses.tigetstr("E3")
+	if e3:
+		curses.putp(e3)
+	curses.putp(curses.tigetstr("clear"))
+	sys.stdout.flush()
+
 class JemfShell(CommandInterpreter):
 
 	# Time out after 2 minutes waiting for input (can be
@@ -319,6 +328,7 @@ class JemfShell(CommandInterpreter):
 		if self.input_timeout <= 0:
 			return
 		def alrm_handler(signum, frame):
+			clear_terminal()
 			errprint("Input timeout exceeded; exiting.\n")
 			sys.exit(1)
 		signal.signal(signal.SIGALRM, alrm_handler)
