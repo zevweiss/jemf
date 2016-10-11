@@ -305,6 +305,8 @@ class JemfShell(CommandInterpreter):
 	def postcmd(self, stop, line):
 		return stop
 
+	# This is defined to override default "repeat previous
+	# command" behavior on getting an empty line.
 	def emptyline(self):
 		return
 
