@@ -470,7 +470,7 @@ class Jemf(object):
 			proc.communicate(str.encode(s, "utf-8"))
 			status = proc.wait()
 			if status != 0:
-				errprint("'%s' exited with status %d" % (self.pipe_to, status))
+				errprint("['%s' exited with status %d]" % (self.pipe_to, status))
 			else:
 				# might stderr be more appropriate here?
 				print("[sent output to '%s']" % self.pipe_to)
@@ -936,7 +936,7 @@ if __name__ == "__main__":
 		main()
 	except subprocess.CalledProcessError as cpe:
 		cmdname = cpe.cmd[0] if type(cpe.cmd) is list else cpe.cmd.split()[0]
-		print("%s exited with status %d" % (cmdname, cpe.returncode), file=sys.stderr)
+		print("[%s exited with status %d]" % (cmdname, cpe.returncode), file=sys.stderr)
 		exit(1)
 	except UserError as ue:
 		if ue.args[0]:
