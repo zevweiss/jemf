@@ -154,7 +154,11 @@ def run_gpg(args, passwd, stdin_data=None):
 
 	retval = proc.wait()
 	if retval != 0:
-		errprint(stderr_data)
+		msg = stderr_data.decode("utf-8")
+		# make a common message from gpg a bit more "user friendly"
+		if "decryption failed: Bad session key" in msg:
+			msg = "Error: incorrect password."
+		errprint(msg)
 		raise subprocess.CalledProcessError(retval, cmdargs)
 
 	return stdout_data
