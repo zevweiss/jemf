@@ -839,7 +839,14 @@ class Jemf(object):
 		# clobbering it completely.
 		orig_pipe_to = self.pipe_to
 		self.pipe_to = args.pipe_to
-		sh.cmdloop()
+		while True:
+			try:
+				sh.cmdloop()
+			except KeyboardInterrupt:
+				sys.stdout.write("^C\n")
+				continue
+			else:
+				break
 		self.pipe_to = orig_pipe_to
 
 def open_jemf_fs(args):
