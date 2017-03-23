@@ -921,7 +921,11 @@ def main():
 			error("no jemf FS found or specified")
 
 	ctor = new_jemf_fs if doing_mkfs else open_jemf_fs
-	args.action(ctor(args), args)
+	try:
+		args.action(ctor(args), args)
+	except KeyboardInterrupt:
+		sys.stdout.write("^C\n")
+		exit(1)
 
 if __name__ == "__main__":
 	try:
