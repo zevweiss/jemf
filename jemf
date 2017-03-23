@@ -872,6 +872,7 @@ def main():
 				     " (ssh-askpass and zenity/[g]xmessage)")
 
 	subparsers = mainparser.add_subparsers(metavar="COMMAND", title=None)
+	subparsers.required = True
 
 	# sorted for ordering in --help output
 	for cmd in sorted(Jemf.commands, key=lambda c: c.name):
