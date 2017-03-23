@@ -121,11 +121,14 @@ class JemfJSONEncoder(json.JSONEncoder):
 	def default(self, obj):
 		if isinstance(obj, File):
 			if obj.metadata is not None:
-				return [obj.data, dict(mtime=obj.metadata.mtime,
-						       mtzname=obj.metadata.mtzname,
-						       mhost=obj.metadata.mhost)]
+				return [obj.data, obj.metadata.to_json_obj()]
 			else:
 				return obj.data
+		elif isinstance(obj, Directory):
+			if obj.metadata is not None:
+				return [obj.dentries, obj.metadata.to_json_obj()]
+			else:
+				return obj.dentries
 		return json.JSONEncoder.default(self, obj)
 
 def pretty_json_dump(d):
@@ -264,11 +267,17 @@ class Metadata(object):
 		return cls(time.time(), time.tzname[time.daylight], get_hostname())
 
 	@classmethod
-	def valid_dict_encoding(cls, d):
-		return (isinstance(d, dict)
-			and all(k in obj[1] for k in ["mtime", "mtzname", "mhost"])
-			and isinstance(d["mtime"], float)
-			and all(isinstance(obj[1][k], strtypes) for k in ["mtzname", "mhost"]))
+	def from_json_obj(cls, d):
+		if not (isinstance(d, dict)
+		        and len(d) == 3
+		        and all(k in d for k in ["mtime", "mtzname", "mhost"])
+		        and isinstance(d["mtime"], float)
+		        and all(isinstance(d[k], strtypes) for k in ["mtzname", "mhost"])):
+			raise CorruptFS("Invalid metadata object")
+		return cls(d["mtime"], d["mtzname"], d["mhost"])
+
+	def to_json_obj(self):
+		return dict(mtime=self.mtime, mtzname=self.mtzname, mhost=self.mhost)
 
 class File(object):
 	def __init__(self, data):
@@ -276,72 +285,84 @@ class File(object):
 		self.metadata = Metadata.herenow()
 
 	@classmethod
-	def with_metadata(cls, data, mtime, mtzname, mhost):
-		f = cls(data)
-		f.metadata = Metadata(mtime, mtzname, mhost)
-		return f
+	def from_json_obj(cls, o):
+		if isinstance(o, strtypes):
+			# bare file object, no metadata
+			f = cls(o)
+			f.metadata = None
+			return f
+		elif isinstance(o, list):
+			# file object with metadata
+			if len(o) != 2:
+				raise CorruptFS("Invalid file object")
+			f = File.from_json_obj(o[0])
+			f.metadata = Metadata.from_json_obj(o[1])
+			return f
+		else:
+			raise CorruptFS("Invalid file object")
 
-	@classmethod
-	def without_metadata(cls, data):
-		f = cls(data)
-		f.metadata = None
-		return f
-
-class Directory(dict):
+class Directory(object):
 	def __init__(self, parent):
 		if parent is None:
 			parent = self
 		else:
 			assert type(parent) is Directory
 		self._specials = {os.path.curdir: self, os.path.pardir: parent}
-		self._dict = super(Directory, self)
+		self.dentries = {}
 		self.metadata = None
 
 	@classmethod
-	def from_dict(cls, d, parent=None):
-		newdir = cls(parent)
-		for name, obj in d.items():
-			if isinstance(obj, list):
-				if (not len(obj) == 2
-				    or not Metadata.valid_dict_encoding(obj[1]))
-					raise ValueError("invalid file (list) object")
+	def from_json_obj(cls, o, parent=None):
+		if isinstance(o, dict):
+			# bare directory object, no metadata
+			newdir = cls(parent)
+			for name, obj in o.items():
+				if (isinstance(obj, dict)
+				    or (isinstance(obj, list) and isinstance(obj[0], dict))):
+					obj = Directory.from_json_obj(obj, newdir)
+				elif (isinstance(obj, strtypes)
+				      or (isinstance(obj, list) and isinstance(obj[0], strtypes))):
+					obj = File.from_json_obj(obj)
+				else:
+					raise CorruptFS("Invalid object")
+				newdir[name] = obj
 
-				mtime = obj[1]["mtime"]
-				mtzname = obj[1]["mtzname"]
-				mhost = obj[1]["mhost"]
+			# HACK: undo metadata updates done automatically while filling in dirents
+			newdir.metadata = None
+			return newdir
+		elif isinstance(o, list):
+			if len(o) != 2:
+				raise CorruptFS("Invalid directory object")
+			d = Directory.from_json_obj(o[0], parent)
+			d.metadata = Metadata.from_json_obj(o[1])
+			return d
+		else:
+			raise CorruptFS("Invalid directory object")
 
-				if isinstance(obj[0], strtypes):
-					obj = File.with_metadata(obj[0], mtime, mtzname, mhost)
-				elif isinstance(obj[0], dict):
-					obj = cls.from_dict(obj[0], newdir)
-					obj.metadata = Metadata(mtime, mtzname, mhost)
-			elif isinstance(obj, dict):
-				# old-style directory, no metadata
-				obj = cls.from_dict(obj, newdir)
-			elif isinstance(obj, strtypes):
-				# old-style file, no metadata
-				obj = File.without_metadata(obj)
-			else:
-				raise ValueError("Unexpected non-dict, non-string, non-list object (%s)" % type(obj))
-			newdir[name] = obj
-		return newdir
+	def touch(self):
+		self.metadata = Metadata.herenow()
 
 	def __getitem__(self, k):
 		if k in self._specials:
 			return self._specials[k]
 		else:
-			return self._dict.__getitem__(k)
+			return self.dentries.__getitem__(k)
 
 	def __contains__(self, k):
-		return k in self._specials or self._dict.__contains__(k)
+		return k in self._specials or self.dentries.__contains__(k)
 
 	def __setitem__(self, k, v):
 		assert k not in self._specials
-		self._dict.__setitem__(k, v)
+		self.touch()
+		self.dentries.__setitem__(k, v)
 
 	def __delitem__(self, k):
 		assert k not in self._specials
-		self._dict.__delitem__(k)
+		self.touch()
+		self.dentries.__delitem__(k)
+
+	def items(self):
+		return self.dentries.items()
 
 def isdir(obj):
 	assert isinstance(obj, (File, Directory))
@@ -429,9 +450,9 @@ class JemfShell(CommandInterpreter):
 
 		base = orig_text[:-len(pfx)]
 		l = []
-		for name in pdir:
+		for name in pdir.dentries:
 			if name.startswith(pfx):
-				suffix = os.sep if isdir(pdir[name]) else " "
+				suffix = os.sep if isdir(pdir.dentries[name]) else " "
 				l.append(base + name + suffix)
 
 		return l
@@ -506,7 +527,7 @@ class Jemf(object):
 	def _from_json(self, s):
 		jd = json.loads(s)
 		self.metadata = jd.pop("metadata")
-		self.data = Directory.from_dict(jd.pop("data"))
+		self.data = Directory.from_json_obj(jd.pop("data"))
 		self.extra_sections = jd
 		self.cwd = self.data
 
@@ -727,7 +748,9 @@ class Jemf(object):
 	def mkdir(self, args):
 		"""create a new directory"""
 		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
-		parent[newname] = Directory(parent)
+		d = Directory(parent)
+		d.touch()
+		parent[newname] = d
 
 	@writer([generate_arg, mk_path_arg("the file to create")],
 		parser_kwargs=dict(epilog=gen_constraints_desc,
@@ -793,7 +816,7 @@ class Jemf(object):
 		obj = parent[tgtname]
 		if obj is self.data:
 			error("can't delete '%s'" % os.sep)
-		elif isdir(obj) and len(obj) > 0 and not args.recursive:
+		elif isdir(obj) and len(obj.dentries) > 0 and not args.recursive:
 			error("'%s' is not empty" % args.path)
 		else:
 			del parent[tgtname]
@@ -822,15 +845,34 @@ class Jemf(object):
 	def ls(self, args):
 		"""list files and directories"""
 		if args.path is not None:
-			obj = self.lookup_path(args.path)
+			path = args.path
+			obj = self.lookup_path(path)
 		else:
+			path = os.path.curdir
 			obj = self.cwd
 
-		if isfile(obj) or args.directory:
-			sys.stdout.write(args.path + '\n')
-		else:
-			for n, o in sorted(obj.items()):
-				sys.stdout.write("%s%s\n" % (n, os.sep if isdir(o) else ""))
+		def lsfmt(objs):
+			if len(objs) == 0:
+				return ''
+			# longest mhost length
+			hostlen = max(len(o[1].metadata.mhost) if o[1].metadata else 0 for o in objs)
+			nometa = "????-??-?? ??:??:?? ???"
+			timefmt = "%Y-%m-%d %H:%M:%S"
+			def fmtitem(item):
+				name, obj = item
+				if args.long:
+					if obj.metadata:
+						m = time.strftime(timefmt, time.localtime(obj.metadata.mtime))
+						m += " %s  %*s  " % (obj.metadata.mtzname, hostlen, obj.metadata.mhost)
+					else:
+						m = "%s  %*s  " % (nometa, hostlen, "?")
+				else:
+					m = ""
+				return "%s%s%s" % (m, name, os.path.sep if isdir(obj) and name[-1] != os.path.sep else "")
+			return '\n'.join(fmtitem(i) for i in objs) + '\n'
+
+		objs = [(path, obj)] if isfile(obj) or args.directory else sorted(obj.items())
+		sys.stdout.write(lsfmt(objs))
 
 	if debugmode:
 		@reader([(("-m", "--metadata"), dict(action="store_const", dest="kind",
