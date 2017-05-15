@@ -92,7 +92,10 @@ def internal_error(msg):
 def getpass_gui(prompt):
 	progs = [["ssh-askpass"], zenity_args + ["--entry", "--hide-text", "--text"]]
 	for p in progs:
-		p = subprocess.Popen(p + [prompt], stdout=subprocess.PIPE)
+		try:
+			p = subprocess.Popen(p + [prompt], stdout=subprocess.PIPE)
+		except OSError as ose:
+			continue
 		output = p.communicate()[0]
 		if p.wait() == 0:
 			assert output[-1] == '\n'
