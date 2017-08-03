@@ -535,13 +535,20 @@ class Jemf(object):
 		self.cwd = self.data
 
 	@classmethod
-	def load_from_path(cls, filename, password):
-		fs = cls(filename, password)
-		s = run_gpg(["-d", "--no-mdc-warning", filename], password)
+	def load_from_string(cls, s):
+		fs = cls(None, None)
 		try:
-			fs._from_json(s.decode("utf-8"))
+			fs._from_json(s)
 		except KeyError:
 			raise CorruptFS("data/metadata not found")
+		return fs
+
+	@classmethod
+	def load_from_path(cls, filename, password):
+		s = run_gpg(["-d", "--no-mdc-warning", filename], password)
+		fs = Jemf.load_from_string(s)
+		fs.filename = filename
+		fs.password = password
 		return fs
 
 	def output_secret(self, s, force):
@@ -961,6 +968,23 @@ class Jemf(object):
 		self.pipe_to = orig_pipe_to
 
 def open_jemf_fs(args):
+	# First try to retrieve from a previously-persisted background process
+	sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+	try:
+		sock.connect(get_sockpath())
+		sock.sendall("%s %s\n" % (READ_CMD, args.fsfile))
+		buf = ''
+		while True:
+			t = sock.recv(1024)
+			if len(t) > 0:
+				buf += t
+			else:
+				break
+		sock.close()
+		return Jemf.load_from_string(buf.decode('utf-8'))
+	except:
+		sock.close()
+
 	if not os.path.exists(args.fsfile):
 		error("'%s' does not exist" % args.fsfile)
 	password = getpass("Enter password for %s: " % args.fsfile)
@@ -979,6 +1003,71 @@ def new_jemf_fs(args):
 
 	return Jemf(args.fsfile, password)
 
+def get_sockdir():
+	uid = os.getuid()
+	return "/tmp/jemf-%d" % uid
+
+def get_sockpath():
+	return get_sockdir() + "/socket"
+
+def get_socket():
+	sockdir = get_sockdir()
+	try:
+		os.mkdir(sockdir, 0o700)
+	except OSError as e:
+		if e.errno == errno.EEXIST:
+			os.chmod(sockdir, 0o700)
+		else:
+			raise
+	sockpath = get_sockpath()
+	sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+	sock.bind(sockpath)
+	os.chmod(sockpath, 0o600)
+
+	return sock
+
+# WRITE?
+# set-timeout?
+READ_CMD = "READ"
+
+def serve_data(fs, fsfile, timeout):
+	srvsock = get_socket()
+	pid = os.fork()
+	if pid == 0:
+		sys.stdin.close()
+		sys.stdout.close()
+		sys.stderr.close()
+
+		srvsock.listen(8)
+		def exit_handler(signum, frame):
+			os.unlink(get_sockpath())
+			sys.exit(0)
+
+		try:
+			while True:
+				signal.signal(signal.SIGTERM, exit_handler)
+				signal.signal(signal.SIGALRM, exit_handler)
+				signal.alarm(timeout)
+
+				client, _ = srvsock.accept()
+				buf = b''
+				while len(buf) == 0 or ('\n' not in buf and len(buf) < 1024):
+					t = client.recv(1024)
+					if len(t) > 0:
+						buf += t
+					else:
+						break
+
+				req = buf.decode('utf-8')
+				if ' ' in req and req[-1] == '\n':
+					cmd, args = req[:-1].split(' ', 1)
+					if cmd == READ_CMD and args == fsfile:
+						client.sendall(fs._to_json().encode('utf-8'))
+				client.close()
+		except:
+			os.unlink(get_sockpath())
+			sys.exit(1)
+
 def main():
 	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem",
 					     epilog="FS file can also be specified with the environment"
@@ -988,6 +1077,9 @@ def main():
 	mainparser.add_argument("-X", "--gui", action="store_true",
 				help="Use GUI sub-programs for password input and status output"
 				     " (ssh-askpass and zenity/[g]xmessage)")
+	mainparser.add_argument("-P", "--persist", type=int, help="fork a background server process for "
+				"passphrase-less operation of subsequent invocations within NSEC seconds",
+				metavar="NSEC", default=0)
 
 	subparsers = mainparser.add_subparsers(metavar="COMMAND", title=None)
 	subparsers.required = True
@@ -1033,10 +1125,14 @@ def main():
 
 	ctor = new_jemf_fs if doing_mkfs else open_jemf_fs
 	try:
-		args.action(ctor(args), args)
+		jfs = ctor(args)
+		args.action(jfs, args)
 	except KeyboardInterrupt:
 		sys.stdout.write("^C\n")
 		exit(1)
+
+	if args.persist > 0:
+		serve_data(jfs, args.fsfile, args.persist)
 
 if __name__ == "__main__":
 	try:
