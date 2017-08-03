@@ -550,7 +550,7 @@ class Jemf(object):
 			print(s, end='\n' if sys.stdout.isatty() else '')
 		else:
 			proc = subprocess.Popen(self.pipe_to, shell=True, stdin=subprocess.PIPE)
-			proc.communicate(str.encode(s, "utf-8"))
+			proc.communicate(s.encode("utf-8"))
 			status = proc.wait()
 			if status != 0:
 				errprint("['%s' exited with status %d]" % (self.pipe_to, status))
@@ -562,7 +562,7 @@ class Jemf(object):
 		self.metadata["last_modification_time"] = time.time()
 		self.metadata["last_modification_tzname"] = time.tzname[time.daylight]
 		self.metadata["last_modification_host"] = get_hostname()
-		jemf_buf = str.encode(self._to_json(), "utf-8") + b'\n'
+		jemf_buf = self._to_json().encode("utf-8") + b'\n'
 
 		# If filename is a symlink, do the new file write & rename in
 		# the  directory in which the pointed-to file resides
