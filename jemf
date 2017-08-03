@@ -37,7 +37,7 @@ except ImportError:
 	pass
 
 default_fspaths = [os.path.expanduser(p) for p in ["~/.config/jemf", "~/.jemf"]]
-gpgcmd = "gpg"
+gpgcmd = "gpg2"
 
 debugmode = os.getenv("JEMF_DEBUG") is not None
 
