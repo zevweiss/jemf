@@ -28,6 +28,8 @@ from cmd import Cmd as CommandInterpreter
 import shlex
 import types
 import functools
+import base64
+import hashlib
 
 try:
 	import readline
@@ -509,6 +511,8 @@ def mk_path_arg(desc, opt=False):
 		d["nargs"] = '?'
 	return (("path",), d)
 
+SOCKBUF_SIZE = 1024
+
 class Jemf(object):
 	def __init__(self, filename, password):
 		self.filename = filename
@@ -520,6 +524,7 @@ class Jemf(object):
 		# (e.g. if it was last written out by a newer version)
 		self.extra_sections = {}
 		self.cwd = self.data
+		self.socket = None
 
 	def _to_json(self):
 		d = self.extra_sections.copy()
@@ -535,21 +540,39 @@ class Jemf(object):
 		self.cwd = self.data
 
 	@classmethod
-	def load_from_string(cls, s):
-		fs = cls(None, None)
+	def load_from_path(cls, filename, password):
+		fs = cls(filename, password)
+		s = run_gpg(["-d", "--no-mdc-warning", filename], password)
 		try:
-			fs._from_json(s)
+			fs._from_json(s.decode("utf-8"))
 		except KeyError:
 			raise CorruptFS("data/metadata not found")
 		return fs
 
+	def recv_response(self):
+		buf = ''
+		while len(buf) == 0 or buf[-1] != '\n':
+			t = self.socket.recv(SOCKBUF_SIZE)
+			if len(t) == 0:
+				raise Exception("invalid response from server")
+			else:
+				buf += t
+		parts = buf[:-1].split(' ', 1)
+		if len(parts) == 1:
+			parts += [None]
+		return parts
+
 	@classmethod
-	def load_from_path(cls, filename, password):
-		s = run_gpg(["-d", "--no-mdc-warning", filename], password)
-		fs = Jemf.load_from_string(s)
-		fs.filename = filename
-		fs.password = password
-		return fs
+	def from_server(cls, socket, filename):
+		fs = cls(filename, None)
+		fs.socket = socket
+		fs.socket.sendall("%s %s\n" % (READ_REQ, base64.b64encode(filename)))
+		resp, data = fs.recv_response()
+		if resp == "OK":
+			fs._from_json(base64.b64decode(data).decode("utf-8"))
+			return fs
+		else:
+			raise Exception(data)
 
 	def output_secret(self, s, force):
 		if self.pipe_to is None:
@@ -571,8 +594,19 @@ class Jemf(object):
 		self.metadata["last_modification_host"] = get_hostname()
 		jemf_buf = self._to_json().encode("utf-8") + b'\n'
 
+		if self.socket is not None:
+			assert self.password is None
+			self.socket.sendall("%s %s %s\n" % (WRITE_REQ,
+							    base64.b64encode(self.filename),
+							    base64.b64encode(jemf_buf)))
+			resp, data = self.recv_response()
+			if resp == "OK":
+				return
+			else:
+				raise Exception(data)
+
 		# If filename is a symlink, do the new file write & rename in
-		# the  directory in which the pointed-to file resides
+		# the directory in which the pointed-to file resides
 		filename = os.path.realpath(self.filename)
 
 		dirpath = os.path.dirname(filename)
@@ -968,20 +1002,11 @@ class Jemf(object):
 		self.pipe_to = orig_pipe_to
 
 def open_jemf_fs(args):
-	# First try to retrieve from a previously-persisted background process
+	# First try to open via a persistent server process
 	sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 	try:
-		sock.connect(get_sockpath())
-		sock.sendall("%s %s\n" % (READ_CMD, args.fsfile))
-		buf = ''
-		while True:
-			t = sock.recv(1024)
-			if len(t) > 0:
-				buf += t
-			else:
-				break
-		sock.close()
-		return Jemf.load_from_string(buf.decode('utf-8'))
+		sock.connect(get_sockpath(args.fsfile))
+		return Jemf.from_server(sock, args.fsfile)
 	except:
 		sock.close()
 
@@ -1005,12 +1030,12 @@ def new_jemf_fs(args):
 
 def get_sockdir():
 	uid = os.getuid()
-	return "/tmp/jemf-%d" % uid
+	return "/tmp/.jemf-%d" % uid
 
-def get_sockpath():
-	return get_sockdir() + "/socket"
+def get_sockpath(fsfile):
+	return get_sockdir() + "/" + hashlib.sha1(fsfile).hexdigest()
 
-def get_socket():
+def get_socket(fsfile):
 	sockdir = get_sockdir()
 	try:
 		os.mkdir(sockdir, 0o700)
@@ -1019,54 +1044,132 @@ def get_socket():
 			os.chmod(sockdir, 0o700)
 		else:
 			raise
-	sockpath = get_sockpath()
+	sockpath = get_sockpath(fsfile)
 	sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 	sock.bind(sockpath)
 	os.chmod(sockpath, 0o600)
 
 	return sock
 
-# WRITE?
-# set-timeout?
-READ_CMD = "READ"
+# Arbitrary data fields are sent base64-encoded so as to guarantee
+# absence of spaces and LFs (which are significant).
+#
+# Request: 'READ' SP base64(fsfile-path) LF
+# Response:
+#   'OK' SP base64(json) LF
+#   'ERROR' SP error-message LF
+#
+# Request: 'WRITE' SP base64(fsfile-path) SP base64(json) LF
+# Response:
+#   'OK' LF
+#   'ERROR' SP error-message LF
+#
+# Request: 'EXIT' LF
+# Response: 'OK' LF
 
-def serve_data(fs, fsfile, timeout):
-	srvsock = get_socket()
+EXIT_REQ = "EXIT"
+READ_REQ = "READ"
+WRITE_REQ = "WRITE"
+
+def err_resp(s):
+	return "ERROR %s\n" % s
+
+def serve_request(line, fs, client):
+	fields = line.split(' ')
+	req = fields[0]
+	if req == EXIT_REQ:
+		os.kill(os.getppid(), signal.SIGTERM)
+		client.sendall("OK\n")
+		os._exit(0)
+	elif req == READ_REQ:
+		if len(fields) != 2:
+			client.sendall(err_resp("wrong number of arguments to READ"))
+		else:
+			path = base64.b64decode(fields[1])
+			if path == fs.filename:
+				client.sendall("OK %s\n" % base64.b64encode(fs._to_json()))
+			else:
+				client.sendall(err_resp("wrong filename"))
+	elif req == WRITE_REQ:
+		if len(fields) != 3:
+			client.sendall(err_resp("wrong number of arguments to WRITE"))
+		else:
+			path, data = map(base64.b64decode, fields[1:])
+			if path == fs.filename:
+				try:
+					fs._from_json(data)
+					fs._write_out()
+					client.sendall("OK\n")
+				except:
+					# TODO: better error message?
+					client.sendall("ERROR update failed\n")
+			else:
+				client.sendall(err_resp("wrong filename"))
+	else:
+		client.sendall(err_resp("invalid request"))
+
+def serve_client(client, fs):
+	buf = b''
+	while True:
+		t = client.recv(SOCKBUF_SIZE)
+		if len(t) == 0:
+			break
+		else:
+			buf += t
+			if '\n' in t:
+				lines = buf.split('\n')
+				buf = lines[-1]
+				for line in lines[:-1]:
+					serve_request(line, fs, client)
+
+def serve_fs(fs, timeout):
+	srvsock = get_socket(fs.filename)
 	pid = os.fork()
 	if pid == 0:
-		sys.stdin.close()
-		sys.stdout.close()
-		sys.stderr.close()
+		os.close(sys.stdin.fileno())
+		os.close(sys.stdout.fileno())
+		os.close(sys.stderr.fileno())
 
 		srvsock.listen(8)
+
 		def exit_handler(signum, frame):
-			os.unlink(get_sockpath())
-			sys.exit(0)
+			try:
+				os.unlink(get_sockpath(fs.filename))
+			except:
+				pass
+			exit(0)
+
+		def chld_handler(signum, frame):
+			os.wait()
+
+		signal.signal(signal.SIGTERM, exit_handler)
+		signal.signal(signal.SIGALRM, exit_handler)
+		signal.signal(signal.SIGCHLD, chld_handler)
 
 		try:
 			while True:
-				signal.signal(signal.SIGTERM, exit_handler)
-				signal.signal(signal.SIGALRM, exit_handler)
 				signal.alarm(timeout)
-
-				client, _ = srvsock.accept()
-				buf = b''
-				while len(buf) == 0 or ('\n' not in buf and len(buf) < 1024):
-					t = client.recv(1024)
-					if len(t) > 0:
-						buf += t
+				try:
+					client, _ = srvsock.accept()
+				except socket.error as err:
+					if err.errno == errno.EINTR:
+						continue
 					else:
-						break
-
-				req = buf.decode('utf-8')
-				if ' ' in req and req[-1] == '\n':
-					cmd, args = req[:-1].split(' ', 1)
-					if cmd == READ_CMD and args == fsfile:
-						client.sendall(fs._to_json().encode('utf-8'))
+						raise
+				pid = os.fork()
+				if pid == 0:
+					try:
+						serve_client(client, fs)
+						os._exit(0)
+					except:
+						os._exit(1)
 				client.close()
 		except:
-			os.unlink(get_sockpath())
-			sys.exit(1)
+			try:
+				os.unlink(get_sockpath(fs.filename))
+			except:
+				pass
+			exit(1)
 
 def main():
 	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem",
@@ -1131,8 +1234,8 @@ def main():
 		sys.stdout.write("^C\n")
 		exit(1)
 
-	if args.persist > 0:
-		serve_data(jfs, args.fsfile, args.persist)
+	if args.persist > 0 and jfs.socket is None:
+		serve_fs(jfs, args.persist)
 
 if __name__ == "__main__":
 	try:
