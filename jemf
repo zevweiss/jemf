@@ -92,7 +92,8 @@ def internal_error(msg):
 	raise InternalError("Internal error: %s" % msg)
 
 def getpass_gui(prompt):
-	progs = [["ssh-askpass"], zenity_args + ["--entry", "--hide-text", "--text"]]
+	progs = [["ssh-askpass"], ["gnome-ssh-askpass"],
+		 zenity_args + ["--entry", "--hide-text", "--text"]]
 	for p in progs:
 		try:
 			p = subprocess.Popen(p + [prompt], stdout=subprocess.PIPE)
@@ -1179,7 +1180,7 @@ def main():
 	mainparser.add_argument("-f", "--fsfile", type=str, help="jemf FS file to use")
 	mainparser.add_argument("-X", "--gui", action="store_true",
 				help="Use GUI sub-programs for password input and status output"
-				     " (ssh-askpass and zenity/[g]xmessage)")
+				     " ([gnome-]ssh-askpass and zenity/[g]xmessage)")
 	mainparser.add_argument("-P", "--persist", type=int, help="fork a background server process for "
 				"passphrase-less operation of subsequent invocations within NSEC seconds",
 				metavar="NSEC", default=0)
