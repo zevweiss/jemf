@@ -526,6 +526,7 @@ class Jemf(object):
 		self.extra_sections = {}
 		self.cwd = self.data
 		self.socket = None
+		self.shell_mode = False
 
 	def _to_json(self):
 		d = self.extra_sections.copy()
@@ -762,6 +763,23 @@ class Jemf(object):
 		self.metadata = {}
 		self.extra_sections = {}
 
+	@writer([])
+	def chpass(self, args):
+		"""change the master password of a jemf FS"""
+
+		if self.password is None:
+			error("can't change password via background-process socket")
+
+		# Only verify that the user knows the current password
+		# in shell mode (in batch mode they'll have just
+		# entered it).
+		if self.shell_mode:
+			if getpass("Enter current password for %s: " % self.filename) != self.password:
+				error("password incorrect")
+
+		newpass = confirmed_getpass("new password for %s" % self.filename)
+		self.password = newpass
+
 	@reader([mk_path_arg("directory to change to (default: root)", opt=True)],
 		shell_only=True)
 	def cd(self, args):
@@ -974,6 +992,8 @@ class Jemf(object):
 		"""start an interactive jemf shell"""
 		sh = JemfShell(self, args)
 
+		self.shell_mode = True
+
 		for cmd in self.commands:
 			if cmd.batch_only:
 				continue
@@ -1001,6 +1021,10 @@ class Jemf(object):
 			else:
 				break
 		self.pipe_to = orig_pipe_to
+
+		# likewise, this shouldn't really be necessary, but
+		# just for sake of cleanliness...
+		self.shell_mode = False
 
 def open_jemf_fs(args):
 	# First try to open via a persistent server process
