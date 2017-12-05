@@ -876,17 +876,21 @@ class Jemf(object):
 
 	@writer([(("-r", "--recursive"), dict(help="recursively delete directory contents",
 					      action="store_true")),
-		 mk_path_arg("the file or directory to delete")])
+		 mk_path_arg("the file or directory to delete", multiple_ok=True)])
 	def rm(self, args):
 		"""delete a file or directory"""
-		parent, tgtname = self.lookup_for_edit(args.path, should_exist=True)
-		obj = parent[tgtname]
-		if obj is self.data:
-			error("can't delete '%s'" % os.sep)
-		elif isdir(obj) and len(obj.dentries) > 0 and not args.recursive:
-			error("'%s' is not empty" % args.path)
-		else:
-			del parent[tgtname]
+		errors = []
+		for path in args.paths:
+			parent, tgtname = self.lookup_for_edit(path, should_exist=True)
+			obj = parent[tgtname]
+			if obj is self.data:
+				errors.append("can't delete '%s'" % os.sep)
+			elif isdir(obj) and len(obj.dentries) > 0 and not args.recursive:
+				errors.append("'%s' is not empty" % args.path)
+			else:
+				del parent[tgtname]
+		if len(errors) > 0:
+			error("; ".join(errors))
 
 	@reader([mk_path_arg("the file to print"), force_print_arg])
 	def cat(self, args):
