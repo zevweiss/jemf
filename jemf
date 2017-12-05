@@ -506,11 +506,15 @@ def mk_raise_usage_error(usage):
 		raise UsageError("%s\n%s" % (usg, msg.strip()))
 	return func
 
-def mk_path_arg(desc, opt=False):
+def mk_path_arg(desc, opt=False, multiple_ok=False):
 	d = dict(metavar="PATH", help=desc)
-	if opt:
+	if opt and multiple_ok:
+		d["nargs"] = '*'
+	elif multiple_ok:
+		d["nargs"] = '+'
+	elif opt:
 		d["nargs"] = '?'
-	return (("path",), d)
+	return (("path%s" % ("s" if multiple_ok else ""),), d)
 
 SOCKBUF_SIZE = 1024
 
