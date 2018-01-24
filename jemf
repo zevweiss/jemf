@@ -1158,9 +1158,14 @@ def serve_fs(fs, timeout):
 	srvsock = get_socket(fs.filename)
 	pid = os.fork()
 	if pid == 0:
-		os.close(sys.stdin.fileno())
-		os.close(sys.stdout.fileno())
-		os.close(sys.stderr.fileno())
+		for f in [sys.stdin, sys.stdout, sys.stderr]:
+			f.close()
+		fd = os.open("/dev/null", os.O_RDWR)
+		os.dup2(fd, 0)
+		os.dup2(fd, 1)
+		os.dup2(fd, 2)
+		if fd > 2:
+			os.close(fd)
 
 		srvsock.listen(8)
 
