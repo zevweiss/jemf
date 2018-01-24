@@ -886,7 +886,7 @@ class Jemf(object):
 			if obj is self.data:
 				errors.append("can't delete '%s'" % os.sep)
 			elif isdir(obj) and len(obj.dentries) > 0 and not args.recursive:
-				errors.append("'%s' is not empty" % args.path)
+				errors.append("'%s' is not empty" % path)
 			else:
 				del parent[tgtname]
 		if len(errors) > 0:
