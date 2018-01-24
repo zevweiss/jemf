@@ -1133,9 +1133,8 @@ def serve_request(line, fs, client):
 					fs._from_json(data)
 					fs._write_out()
 					client.sendall("OK\n")
-				except:
-					# TODO: better error message?
-					client.sendall("ERROR update failed\n")
+				except Exception as ex:
+					client.sendall(err_resp("update failed: %s\n" % str(ex.args)))
 			else:
 				client.sendall(err_resp("wrong filename"))
 	else:
