@@ -12,7 +12,7 @@ from __future__ import print_function
 
 import sys
 import argparse
-from getpass import getpass as getpass_tty
+from getpass import getuser as get_username, getpass as getpass_tty
 import subprocess
 import json
 import os
@@ -30,6 +30,7 @@ import types
 import functools
 import base64
 import hashlib
+import atexit
 
 try:
 	import readline
@@ -1034,7 +1035,47 @@ class Jemf(object):
 		# just for sake of cleanliness...
 		self.shell_mode = False
 
+def lock_fsfile(fspath):
+	# canonicalize path to avoid problems if fspath is a symlink
+	# (in which case two processes could end up accessing the same
+	# fsfile using two different locks)
+	lockpath = os.path.realpath(fspath) + '.lock'
+
+	# Use a symlink as a lock (pointing to some lock metadata as a
+	# string), emacs-style -- this has the advantage of being able
+	# to be created and written in one atomic step, as opposed to
+	# a regular file where the creation and data-writing are
+	# separate steps (meaning another process could observe the
+	# odd in-between state)
+	lockdata = "%s@%s.%d" % (get_username(), get_hostname(), os.getpid())
+	try:
+		os.symlink(lockdata, lockpath)
+	except OSError as e:
+		if e.errno == errno.EEXIST:
+			try:
+				owner = os.readlink(lockpath)
+				error("%s is currently locked by %s" % (fspath, owner))
+			except OSError as e2:
+				# there's a chance the lock could have
+				# been released between when we
+				# attempted to acquire it and now (as
+				# we try to read owner info from it
+				# after failing) -- if so, just leave
+				# the retry to the user.
+				base = "%s was locked, but " % fspath
+				if e2.errno == errno.ENOENT:
+					extra = "appears to have been released"
+				else:
+					extra = "unable to determine owner: %s" % e2.strerror
+				error(base + extra)
+		else:
+			error("failed to lock %s: %s" % e.strerror)
+
+	atexit.register(lambda: os.unlink(lockpath))
+
 def open_jemf_fs(args):
+	lock_fsfile(args.fsfile)
+
 	# First try to open via a persistent server process
 	sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 	try:
