@@ -1035,6 +1035,8 @@ class Jemf(object):
 		# just for sake of cleanliness...
 		self.shell_mode = False
 
+unlock_hook = None
+
 def lock_fsfile(fspath):
 	# canonicalize path to avoid problems if fspath is a symlink
 	# (in which case two processes could end up accessing the same
@@ -1080,7 +1082,12 @@ def lock_fsfile(fspath):
 	# multiple clients concurrently operating on the same fsfile
 	# would still be problematic even if doing so via a single
 	# server process).
-	atexit.register(lambda: os.unlink(lockpath))
+	#
+	# We do want to unregister it in the forked child though (so
+	# that it doesn't try to spuriously unlink the lockfile
+	# itself), so we save a copy of the hook so it can do so.
+	global unlock_hook
+	unlock_hook = atexit.register(lambda: os.unlink(lockpath))
 
 def open_jemf_fs(args):
 	lock_fsfile(args.fsfile)
@@ -1217,6 +1224,11 @@ def serve_fs(fs, timeout):
 		os.dup2(fd, 2)
 		if fd > 2:
 			os.close(fd)
+
+		global unlock_hook
+		if unlock_hook is not None:
+			atexit.unregister(unlock_hook)
+			unlock_hook = None
 
 		srvsock.listen(8)
 
