@@ -1071,6 +1071,15 @@ def lock_fsfile(fspath):
 		else:
 			error("failed to lock %s: %s" % e.strerror)
 
+	# This handler remains registered in the foreground process in
+	# persist mode (i.e. the original process releases the lock
+	# when it exits, leaving the background process running
+	# without holding it).  It's the client's responsibility to
+	# acquire the lock before connecting to the server for a given
+	# fsfile (given the in-memory caching done by clients, having
+	# multiple clients concurrently operating on the same fsfile
+	# would still be problematic even if doing so via a single
+	# server process).
 	atexit.register(lambda: os.unlink(lockpath))
 
 def open_jemf_fs(args):
