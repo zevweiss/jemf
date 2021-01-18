@@ -100,7 +100,7 @@ def getpass_gui(prompt):
 			p = subprocess.Popen(p + [prompt], stdout=subprocess.PIPE)
 		except OSError as ose:
 			continue
-		output = p.communicate()[0]
+		output = p.communicate()[0].decode("utf-8")
 		if p.wait() == 0:
 			assert output[-1] == '\n'
 			return output[:-1]
@@ -557,14 +557,14 @@ class Jemf(object):
 		return fs
 
 	def recv_response(self):
-		buf = ''
-		while len(buf) == 0 or buf[-1] != '\n':
+		buf = b''
+		while len(buf) == 0 or buf[-1] != b'\n'[0]:
 			t = self.socket.recv(SOCKBUF_SIZE)
 			if len(t) == 0:
 				raise Exception("invalid response from server")
 			else:
 				buf += t
-		parts = buf[:-1].split(' ', 1)
+		parts = buf[:-1].decode("utf-8").split(' ', 1)
 		if len(parts) == 1:
 			parts += [None]
 		return parts
@@ -573,7 +573,7 @@ class Jemf(object):
 	def from_server(cls, socket, filename):
 		fs = cls(filename, None)
 		fs.socket = socket
-		fs.socket.sendall("%s %s\n" % (READ_REQ, base64.b64encode(filename)))
+		fs.socket.sendall(b"%s %s\n" % (READ_REQ, base64.b64encode(filename.encode("utf-8"))))
 		resp, data = fs.recv_response()
 		if resp == "OK":
 			fs._from_json(base64.b64decode(data).decode("utf-8"))
@@ -603,9 +603,9 @@ class Jemf(object):
 
 		if self.socket is not None:
 			assert self.password is None
-			self.socket.sendall("%s %s %s\n" % (WRITE_REQ,
-							    base64.b64encode(self.filename),
-							    base64.b64encode(jemf_buf)))
+			self.socket.sendall(b"%s %s %s\n" % (WRITE_REQ,
+							     base64.b64encode(self.filename.encode("utf-8")),
+							     base64.b64encode(jemf_buf)))
 			resp, data = self.recv_response()
 			if resp == "OK":
 				return
@@ -1107,7 +1107,7 @@ def get_sockdir():
 	return "/tmp/.jemf-%d" % uid
 
 def get_sockpath(fsfile):
-	return get_sockdir() + "/" + hashlib.sha1(fsfile).hexdigest()
+	return get_sockdir() + "/" + hashlib.sha1(fsfile.encode("utf-8")).hexdigest()
 
 def get_socket(fsfile):
 	sockdir = get_sockdir()
@@ -1141,45 +1141,46 @@ def get_socket(fsfile):
 # Request: 'EXIT' LF
 # Response: 'OK' LF
 
-EXIT_REQ = "EXIT"
-READ_REQ = "READ"
-WRITE_REQ = "WRITE"
+EXIT_REQ = b"EXIT"
+READ_REQ = b"READ"
+WRITE_REQ = b"WRITE"
 
 def err_resp(s):
-	return "ERROR %s\n" % s
+	return b"ERROR %s\n" % s.encode("utf-8")
 
 def serve_request(line, fs, client):
-	fields = line.split(' ')
+	fields = line.split(b' ')
 	req = fields[0]
 	if req == EXIT_REQ:
 		os.kill(os.getppid(), signal.SIGTERM)
-		client.sendall("OK\n")
+		client.sendall(b"OK\n")
 		os._exit(0)
 	elif req == READ_REQ:
 		if len(fields) != 2:
-			client.sendall(err_resp("wrong number of arguments to READ"))
+			resp = err_resp("wrong number of arguments to READ")
 		else:
-			path = base64.b64decode(fields[1])
+			path = base64.b64decode(fields[1]).decode("utf-8")
 			if path == fs.filename:
-				client.sendall("OK %s\n" % base64.b64encode(fs._to_json()))
+				resp = b"OK %s\n" % base64.b64encode(fs._to_json().encode("utf-8"))
 			else:
-				client.sendall(err_resp("wrong filename"))
+				resp = err_resp("wrong filename")
 	elif req == WRITE_REQ:
 		if len(fields) != 3:
-			client.sendall(err_resp("wrong number of arguments to WRITE"))
+			resp = err_resp("wrong number of arguments to WRITE")
 		else:
-			path, data = map(base64.b64decode, fields[1:])
+			path, data = [base64.b64decode(s).decode("utf-8") for s in fields[1:]]
 			if path == fs.filename:
 				try:
 					fs._from_json(data)
 					fs._write_out()
-					client.sendall("OK\n")
+					resp = b"OK\n"
 				except Exception as ex:
-					client.sendall(err_resp("update failed: %s\n" % str(ex.args)))
+					resp = err_resp("update failed: %s\n" % str(ex.args))
 			else:
-				client.sendall(err_resp("wrong filename"))
+				resp = err_resp("wrong filename")
 	else:
-		client.sendall(err_resp("invalid request"))
+		resp = err_resp("invalid request")
+	client.sendall(resp)
 
 def serve_client(client, fs):
 	buf = b''
@@ -1189,8 +1190,8 @@ def serve_client(client, fs):
 			break
 		else:
 			buf += t
-			if '\n' in t:
-				lines = buf.split('\n')
+			if b'\n' in t:
+				lines = buf.split(b'\n')
 				buf = lines[-1]
 				for line in lines[:-1]:
 					serve_request(line, fs, client)
