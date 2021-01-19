@@ -974,7 +974,8 @@ class Jemf(object):
 			else:
 				raise
 
-		out, _ = proc.communicate('\n'.join(items) + '\n')
+		out, _ = proc.communicate(b'\n'.join([i.encode("utf-8") for i in items]) + b'\n')
+		out = out.decode("utf-8")
 		retval = proc.wait()
 		if retval != 0 or out == '':
 			return None
