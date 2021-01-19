@@ -392,9 +392,9 @@ def clear_terminal():
 
 class JemfShell(CommandInterpreter):
 
-	# Time out after 2 minutes waiting for input (can be
+	# Time out after 3 minutes waiting for input (can be
 	# overridden via JEMF_TMOUT environment variable)
-	input_timeout = 120
+	input_timeout = 180
 
 	def __init__(self, jemf, args):
 		self.fs = jemf
