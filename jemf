@@ -1256,13 +1256,10 @@ def serve_fs(fs, timeout):
 						continue
 					else:
 						raise
-				pid = os.fork()
-				if pid == 0:
-					try:
-						serve_client(client, fs)
-						os._exit(0)
-					except:
-						os._exit(1)
+				try:
+					serve_client(client, fs)
+				except:
+					os._exit(1)
 				client.close()
 		except:
 			try:
