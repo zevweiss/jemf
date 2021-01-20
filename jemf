@@ -1215,6 +1215,12 @@ def serve_client(client, fs):
 
 def serve_fs(fs, timeout):
 	srvsock = get_socket(fs.filename)
+
+	# ensure the child we're about to fork doesn't inherit a
+	# non-empty stdout buffer (which would result in duplicate
+	# output if it then gets flushed by both processes)
+	sys.stdout.flush()
+
 	pid = os.fork()
 	if pid == 0:
 		for f in [sys.stdin, sys.stdout, sys.stderr]:
