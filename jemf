@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 
 #
 # jemf: an encrypted mini-filesystem.
@@ -7,8 +7,6 @@
 #
 # Copyright (c) Zev Weiss <zev@bewilderbeest.net>
 #
-
-from __future__ import print_function
 
 import sys
 import argparse
