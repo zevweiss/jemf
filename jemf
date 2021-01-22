@@ -402,7 +402,7 @@ class JemfShell(CommandInterpreter):
 	def __init__(self, jemf, args):
 		self.fs = jemf
 		self.args = args
-		self.prompt = "%sjemf[%s]> %s" % (ansi_red, self.fs.filename if sys.stdin.isatty() else "", ansi_rst)
+		self.prompt = ("%sjemf[%s]> %s" % (ansi_red, self.fs.filename, ansi_rst)) if sys.stdin.isatty() else ""
 		tmout = os.getenv("JEMF_TMOUT")
 		if tmout:
 			try:
