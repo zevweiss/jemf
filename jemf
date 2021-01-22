@@ -1259,6 +1259,9 @@ def serve_fs(fs, timeout):
 						continue
 					else:
 						raise
+
+				signal.alarm(0)
+
 				try:
 					serve_client(client, fs)
 				except:
