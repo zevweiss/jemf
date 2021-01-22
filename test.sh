@@ -96,6 +96,19 @@ runtest "rm directory" jemf rm e
 runtest "ls on emptied FS" jemf ls
 runtest "ls output empty after emptying FS" [ -z "$TEST_OUTPUT" ]
 
+runtest "cross-directory rename" jemf shell <<-EOF
+	mkdir d1
+	mkdir d2
+	create -g L12 d1/f
+	mv d1/f d2
+EOF
+
+runtest -n "cat old after cross-directory rename" jemf cat d1/f
+runtest "cat new after cross-directory rename" jemf cat d2/f
+
+runtest -n "rm non-empty directory" jemf rm d2
+runtest "rm -r on non-empty directory" jemf rm -r d2
+
 echo
 echo "Ran $ntests tests; $npass passed, $nfail failed."
 [ "$nfail" = 0 ]
