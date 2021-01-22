@@ -105,8 +105,13 @@ def getpass_gui(prompt):
 
 	error("None of %s succeeded" % [p[0] for p in progs])
 
-getpass = getpass_tty
+getpass_interactive = getpass_tty
 errprint = errprint_tty
+
+def getpass(prompt):
+	if os.getenv("__JEMF_TEST__") == '1':
+		return os.getenv("__JEMF_TEST_PASSWORD__")
+	return getpass_interactive(prompt)
 
 def confirmed_getpass(label):
 	pass1 = getpass("Enter %s: " % label)
@@ -1301,8 +1306,8 @@ def main():
 		exit(0)
 
 	if args.gui:
-		global getpass, errprint
-		getpass = getpass_gui
+		global getpass_interactive, errprint
+		getpass_interactive = getpass_gui
 		errprint = errprint_gui
 
 	if args.fsfile is None:
