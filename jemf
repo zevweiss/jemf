@@ -1246,12 +1246,8 @@ def serve_fs(fs, timeout):
 				pass
 			exit(0)
 
-		def chld_handler(signum, frame):
-			os.wait()
-
 		signal.signal(signal.SIGTERM, exit_handler)
 		signal.signal(signal.SIGALRM, exit_handler)
-		signal.signal(signal.SIGCHLD, chld_handler)
 
 		try:
 			while True:
