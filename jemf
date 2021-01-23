@@ -42,6 +42,8 @@ gpgcmd = "gpg2"
 
 debugmode = os.getenv("JEMF_DEBUG") is not None
 
+CURRENT_FORMAT_VERSION = 2
+
 # Python 2/3 compat stuff
 if hasattr(os, "pipe2"):
 	pipe = lambda: os.pipe2(0)
@@ -64,6 +66,9 @@ class InternalError(Exception):
 	pass
 
 class CorruptFS(Exception):
+	pass
+
+class FormatVersionMismatch(Exception):
 	pass
 
 def errprint_tty(msg):
@@ -348,7 +353,7 @@ class Directory(object):
 			assert type(parent) is Directory
 		self._specials = {os.path.curdir: self, os.path.pardir: parent}
 		self.dentries = {}
-		self.metadata = None
+		self.metadata = Metadata.herenow()
 
 	@classmethod
 	def from_json_obj(cls, o, parent=None):
@@ -558,15 +563,12 @@ class Jemf(object):
 		self.pipe_to = None
 		self.data = Directory(None)
 		self.metadata = {}
-		# to preserve any other stuff found in the file
-		# (e.g. if it was last written out by a newer version)
-		self.extra_sections = {}
 		self.cwd = self.data
 		self.socket = None
 		self.shell_mode = False
 
 	def _to_json(self):
-		d = self.extra_sections.copy()
+		d = {}
 		d["data"] = self.data
 		d["metadata"] = self.metadata
 		return pretty_json_dump(d)
@@ -574,8 +576,13 @@ class Jemf(object):
 	def _from_json(self, s):
 		jd = json.loads(s)
 		self.metadata = jd.pop("metadata")
+
+		fileversion = self.metadata.get("format_version", 1)
+		if fileversion < CURRENT_FORMAT_VERSION:
+			raise FormatVersionMismatch("data is in v%d format, we need v%d"
+						    % (fileversion, CURRENT_FORMAT_VERSION))
+
 		self.data = Directory.from_json_obj(jd.pop("data"))
-		self.extra_sections = jd
 		self.cwd = self.data
 
 	@classmethod
@@ -778,8 +785,7 @@ class Jemf(object):
 	def mkfs(self, args):
 		"""initialize a new jemf FS"""
 		self.data = Directory(None)
-		self.metadata = {}
-		self.extra_sections = {}
+		self.metadata = { "format_version": CURRENT_FORMAT_VERSION }
 
 	@writer([])
 	def chpass(self, args):
@@ -830,7 +836,6 @@ class Jemf(object):
 		"""create a new directory"""
 		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
 		d = Directory(parent)
-		d.touch()
 		parent[newname] = d
 
 	@writer([generate_arg, mk_path_arg("the file to create")],

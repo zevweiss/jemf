@@ -51,17 +51,17 @@ version_funcs = [
 	ensure_v2,
 ]
 
-CURRENT_VERSION = len(version_funcs) - 1
+assert jemf.CURRENT_FORMAT_VERSION == len(version_funcs) - 1
 
 def main():
 	parser = argparse.ArgumentParser(description="update jemf fs file format version")
 	parser.add_argument("-V", "--to-version", type=int, metavar="VERSION",
-			    help="format version to update to", default=CURRENT_VERSION)
+			    help="format version to update to", default=jemf.CURRENT_FORMAT_VERSION)
 	parser.add_argument("fsfile", type=str, help="FS file to operate on")
 
 	args = parser.parse_args()
 
-	if args.to_version < 2 or args.to_version > CURRENT_VERSION:
+	if args.to_version < 2 or args.to_version > jemf.CURRENT_FORMAT_VERSION:
 		print("Invalid version %d" % args.to_version, file=sys.stderr)
 		exit(1)
 
