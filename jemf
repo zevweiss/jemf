@@ -50,12 +50,6 @@ if hasattr(os, "pipe2"):
 else:
 	pipe = os.pipe
 
-try:
-	unicode
-	strtypes = (str, unicode)
-except NameError:
-	strtypes = (str,)
-
 class UserError(Exception):
 	pass
 
@@ -316,7 +310,7 @@ class Metadata(object):
 		        and len(d) == 3
 		        and all(k in d for k in ["mtime", "mtzname", "mhost"])
 		        and isinstance(d["mtime"], float)
-		        and all(isinstance(d[k], strtypes) for k in ["mtzname", "mhost"])):
+		        and all(isinstance(d[k], str) for k in ["mtzname", "mhost"])):
 			raise CorruptFS("Invalid metadata object")
 		return cls(d["mtime"], d["mtzname"], d["mhost"])
 
@@ -330,7 +324,7 @@ class File(object):
 
 	@classmethod
 	def from_json_obj(cls, o):
-		if isinstance(o, strtypes):
+		if isinstance(o, str):
 			# bare file object, no metadata
 			f = cls(o)
 			f.metadata = None
@@ -364,8 +358,8 @@ class Directory(object):
 				if (isinstance(obj, dict)
 				    or (isinstance(obj, list) and isinstance(obj[0], dict))):
 					obj = Directory.from_json_obj(obj, newdir)
-				elif (isinstance(obj, strtypes)
-				      or (isinstance(obj, list) and isinstance(obj[0], strtypes))):
+				elif (isinstance(obj, str)
+				      or (isinstance(obj, list) and isinstance(obj[0], str))):
 					obj = File.from_json_obj(obj)
 				else:
 					raise CorruptFS("Invalid object")
