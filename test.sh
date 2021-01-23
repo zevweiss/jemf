@@ -2,8 +2,24 @@
 
 set -u
 
+stop_on_fail=false
+keep_tmpfile=false
+
+while getopts sk opt; do
+	case "$opt" in
+	s) stop_on_fail=true;;
+	k) keep_tmpfile=true;;
+	*) exit 1;;
+	esac
+done
+
 fsfile="$(mktemp)"
-trap "rm -f $fsfile" EXIT
+
+if $keep_tmpfile; then
+	echo "Test fsfile is $fsfile"
+else
+	trap "rm -f $fsfile" EXIT
+fi
 
 jemf() { ./jemf "$@"; }
 
@@ -14,6 +30,14 @@ export __JEMF_TEST_PASSWORD__="hunter2"
 nfail=0
 npass=0
 ntests=0
+
+finish()
+{
+	echo
+	echo "Ran $ntests tests; $npass passed, $nfail failed."
+	[ "$nfail" = 0 ]
+	exit $?
+}
 
 runtest()
 {
@@ -48,6 +72,9 @@ runtest()
 	else
 		result="fail"
 		((++nfail))
+		if $stop_on_fail; then
+			finish
+		fi
 	fi
 	printf '%s\n' "$result"
 }
@@ -109,6 +136,4 @@ runtest "cat new after cross-directory rename" jemf cat d2/f
 runtest -n "rm non-empty directory" jemf rm d2
 runtest "rm -r on non-empty directory" jemf rm -r d2
 
-echo
-echo "Ran $ntests tests; $npass passed, $nfail failed."
-[ "$nfail" = 0 ]
+finish
