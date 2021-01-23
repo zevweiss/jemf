@@ -128,16 +128,15 @@ def find_fs():
 
 class JemfJSONEncoder(json.JSONEncoder):
 	def default(self, obj):
+		# make sure we're not propagating any relics of old
+		# format versions
+		if isinstance(obj, (File, Directory)):
+			assert obj.metadata is not None
+
 		if isinstance(obj, File):
-			if obj.metadata is not None:
-				return [obj.data, obj.metadata.to_json_obj()]
-			else:
-				return obj.data
+			return [obj.data, obj.metadata.to_json_obj()]
 		elif isinstance(obj, Directory):
-			if obj.metadata is not None:
-				return [obj.dentries, obj.metadata.to_json_obj()]
-			else:
-				return obj.dentries
+			return [obj.dentries, obj.metadata.to_json_obj()]
 		return json.JSONEncoder.default(self, obj)
 
 def pretty_json_dump(d):
@@ -324,16 +323,10 @@ class File(object):
 
 	@classmethod
 	def from_json_obj(cls, o):
-		if isinstance(o, str):
-			# bare file object, no metadata
-			f = cls(o)
-			f.metadata = None
-			return f
-		elif isinstance(o, list):
-			# file object with metadata
+		if isinstance(o, list):
 			if len(o) != 2:
 				raise CorruptFS("Invalid file object")
-			f = File.from_json_obj(o[0])
+			f = cls(o[0])
 			f.metadata = Metadata.from_json_obj(o[1])
 			return f
 		else:
@@ -351,27 +344,21 @@ class Directory(object):
 
 	@classmethod
 	def from_json_obj(cls, o, parent=None):
-		if isinstance(o, dict):
-			# bare directory object, no metadata
-			newdir = cls(parent)
-			for name, obj in o.items():
-				if (isinstance(obj, dict)
-				    or (isinstance(obj, list) and isinstance(obj[0], dict))):
-					obj = Directory.from_json_obj(obj, newdir)
-				elif (isinstance(obj, str)
-				      or (isinstance(obj, list) and isinstance(obj[0], str))):
+		if isinstance(o, list):
+			if len(o) != 2:
+				raise CorruptFS("Invalid directory object")
+
+			d = cls(parent)
+			for name, obj in o[0].items():
+				if isinstance(obj, list) and isinstance(obj[0], dict):
+					obj = Directory.from_json_obj(obj, d)
+				elif isinstance(obj, list) and isinstance(obj[0], str):
 					obj = File.from_json_obj(obj)
 				else:
 					raise CorruptFS("Invalid object")
-				newdir[name] = obj
+				d[name] = obj
 
-			# HACK: undo metadata updates done automatically while filling in dirents
-			newdir.metadata = None
-			return newdir
-		elif isinstance(o, list):
-			if len(o) != 2:
-				raise CorruptFS("Invalid directory object")
-			d = Directory.from_json_obj(o[0], parent)
+			# clobber metadata updates done automatically while filling in dirents
 			d.metadata = Metadata.from_json_obj(o[1])
 			return d
 		else:
