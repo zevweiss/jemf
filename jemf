@@ -187,6 +187,12 @@ def run_gpg(args, passwd, stdin_data=None):
 
 	return stdout_data
 
+def gpg_decrypt(path, password):
+	return run_gpg(["-d", "--no-mdc-warning", path], password)
+
+def gpg_encrypt(path, password, data):
+	return run_gpg(["-c", "--yes", "-o", path], password, data)
+
 hostname = None
 def get_hostname():
 	global hostname
@@ -552,7 +558,7 @@ class Jemf(object):
 	@classmethod
 	def load_from_path(cls, filename, password):
 		fs = cls(filename, password)
-		s = run_gpg(["-d", "--no-mdc-warning", filename], password)
+		s = gpg_decrypt(filename, password)
 		try:
 			fs._from_json(s.decode("utf-8"))
 		except KeyError:
@@ -622,7 +628,7 @@ class Jemf(object):
 		dirpath = os.path.dirname(filename)
 		tmpfd, tmppath = tempfile.mkstemp(prefix=os.path.basename(filename), dir=dirpath)
 
-		output = run_gpg(["-c", "--yes", "-o", tmppath], self.password, jemf_buf)
+		output = gpg_encrypt(tmppath, self.password, jemf_buf)
 		if output != b'':
 			os.unlink(tmppath)
 			internal_error("Unexpected output from gpg: %s\n" % output)
