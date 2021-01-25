@@ -284,13 +284,18 @@ def generate_data(constraints):
 	random.shuffle(l)
 	return ''.join(l[:cdict['L']])
 
-def recursive_list(obj, pfx, fileonly=False):
+def isdot(p):
+	return p[0] == '.' and p not in [".", ".."]
+
+def recursive_list(obj, pfx, fileonly=False, skip_dots=True):
 	l = []
-	if not fileonly or isfile(obj):
+	skip = skip_dots and isdot(os.path.basename(pfx))
+	if (not fileonly or isfile(obj)) and not skip:
 		l.append(pfx)
-	if isdir(obj):
+	if isdir(obj) and not skip:
 		for n, o in obj.items():
-			l += recursive_list(o, os.path.join(pfx, n), fileonly=fileonly)
+			l += recursive_list(o, os.path.join(pfx, n), fileonly=fileonly,
+					    skip_dots=skip_dots)
 	return l
 
 class Metadata(object):
@@ -906,16 +911,18 @@ class Jemf(object):
 			error("'%s' is a directory" % args.path)
 		self.output_secret(item.data, args.force)
 
-	@reader([mk_path_arg("starting directory (default: .)", opt=True)])
+	@reader([mk_path_arg("starting directory (default: .)", opt=True),
+		 (("-a", "--all"), dict(help="don't skip entries starting with '.'", action="store_true"))])
 	def find(self, args):
 		"""recursively list files and directories"""
 		if args.path is None:
-			paths = recursive_list(self.cwd, os.path.curdir)
+			paths = recursive_list(self.cwd, os.path.curdir, skip_dots=not args.all)
 		else:
-			paths = recursive_list(self.lookup_path(args.path), args.path)
+			paths = recursive_list(self.lookup_path(args.path), args.path, skip_dots=not args.all)
 		sys.stdout.write('\n'.join(paths) + '\n')
 
 	@reader([mk_path_arg("file or directory to list (default: .)", opt=True),
+		 (("-a", "--all"), dict(help="don't skip entries starting with '.'", action="store_true")),
 		 (("-l", "--long"), dict(help="use long format", action="store_true")),
 		 (("-d", "--directory"), dict(help="list directories themselves, not their contents",
 					      action="store_true"))])
@@ -946,7 +953,7 @@ class Jemf(object):
 				else:
 					m = ""
 				return "%s%s%s" % (m, name, os.path.sep if isdir(obj) and name[-1] != os.path.sep else "")
-			return '\n'.join(fmtitem(i) for i in objs) + '\n'
+			return '\n'.join(fmtitem(i) for i in objs if not isdot(i[0]) or args.all) + '\n'
 
 		objs = [(path, obj)] if isfile(obj) or args.directory else sorted(obj.items())
 		sys.stdout.write(lsfmt(objs))
@@ -988,10 +995,11 @@ class Jemf(object):
 			assert out[-1] == '\n'
 			return out[:-1]
 
-	@reader([force_print_arg])
+	@reader([force_print_arg,
+		 (("-a", "--all"), dict(help="don't skip entries starting with '.'", action="store_true"))])
 	def menu(self, args):
 		"""print a file selected from a menu (requires `dmenu')"""
-		paths = recursive_list(self.cwd, os.path.curdir, fileonly=True)
+		paths = recursive_list(self.cwd, os.path.curdir, fileonly=True, skip_dots=not args.all)
 		selected = self._menu_select(sorted(paths))
 		if selected is None:
 			print("(Nothing selected.)", file=sys.stderr)
