@@ -643,6 +643,8 @@ class Jemf(object):
 		fsdir = root
 		trail = os.sep
 		for c in comps:
+			if not isdir(fsdir):
+				error("'%s' is not a directory" % trail)
 			try:
 				fsdir = fsdir[c]
 			except KeyError:
