@@ -29,6 +29,7 @@ import functools
 import base64
 import hashlib
 import atexit
+import re
 
 try:
 	import readline
@@ -215,8 +216,13 @@ def get_hostname():
 		hostname = socket.gethostbyaddr(socket.gethostname())[0]
 	return hostname
 
+multi_slash_pat = re.compile('//+')
+trailing_slash_pat = re.compile('/+$')
+
 def path_components(path):
-	np = os.path.normpath(path)
+	# collapse redundant slashes and remove trailing slashes
+	np = re.sub(multi_slash_pat, '/', path)
+	np = re.sub(trailing_slash_pat, '', np)
 	while len(np) > 0 and np[0] == os.sep:
 		np = np[1:]
 	return np.split(os.sep) if len(np) > 0 else []
@@ -369,6 +375,8 @@ class Directory(FSObj):
 				obj = File.from_json_obj(item)
 			elif t == 'd':
 				obj = Directory.from_json_obj(item, parent=self)
+			elif t == 'l':
+				obj = Symlink.from_json_obj(item)
 			else:
 				raise CorruptFS("invalid object type: %s" % t)
 			self[name] = obj
@@ -417,6 +425,34 @@ class Directory(FSObj):
 	def items(self):
 		return self.dentries.items()
 
+class Symlink(FSObj):
+	type_id = 'l'
+
+	def __init__(self, target, init_metadata=True):
+		super().__init__(init_metadata)
+		self.target = target
+
+	def _fill_from_json_obj(self, jd):
+		super()._fill_from_json_obj(jd)
+		self.target = extract(jd, "target", str)
+		if len(jd) > 0:
+			raise CorruptFS("extra keys in symlink object: %s"
+					% ", ".join(jd.keys()))
+
+	@classmethod
+	def from_json_obj(cls, jd):
+		if not isinstance(jd, dict):
+			raise CorruptFS("invalid symlink object (%s)" % type(jd).__name__)
+
+		l = Symlink(None, init_metadata=False)
+		l._fill_from_json_obj(jd)
+		return l
+
+	def to_json_obj(self):
+		d = super().to_json_obj()
+		d["target"] = self.target
+		return d
+
 def isdir(obj):
 	assert isinstance(obj, FSObj)
 	return isinstance(obj, Directory)
@@ -424,6 +460,10 @@ def isdir(obj):
 def isfile(obj):
 	assert isinstance(obj, FSObj)
 	return isinstance(obj, File)
+
+def islink(obj):
+	assert isinstance(obj, FSObj)
+	return isinstance(obj, Symlink)
 
 ansi_red = "\x1b[31m"
 ansi_rst = "\x1b[m"
@@ -678,6 +718,7 @@ class Jemf(object):
 		for c in comps:
 			if not isdir(fsdir):
 				error("'%s' is not a directory" % trail)
+			prevdir = fsdir
 			try:
 				fsdir = fsdir[c]
 			except KeyError:
@@ -685,20 +726,31 @@ class Jemf(object):
 					return None
 				else:
 					error("'%s' does not exist in '%s'" % (c, trail))
+			# TODO: ELOOP detection?
+			while islink(fsdir):
+				tmp = self.lookup_path(fsdir.target, noexc=noexc,
+						       override_cwd=prevdir)
+				prevdir = fsdir
+				fsdir = tmp
 			trail = os.path.join(trail, c)
 		return fsdir
 
-	def lookup_path(self, path, noexc=False):
+	def lookup_path(self, path, noexc=False, override_cwd=None):
 		if len(path) > 0 and path[0] == os.sep:
 			root = self.data
 		else:
-			root = self.cwd
+			root = override_cwd if override_cwd else self.cwd
 		return self._lookup_comps(root, path_components(path), noexc=noexc)
 
-	def lookup_for_edit(self, path, should_exist):
-		"""Lookup the parent of 'path', returning a tuple of it and the last
-		component of 'path'."""
-		root = self.data if path[0] == os.sep else self.cwd
+	def lookup_for_edit(self, path, should_exist, override_cwd=None):
+		"""Lookup 'path', returning a 3-tuple of the parent directory, the
+		last component of 'path', and the object itself (or None
+		if it doesn't exist).
+		"""
+		if len(path) > 0 and path[0] == os.sep:
+			root = self.data
+		else:
+			root = override_cwd if override_cwd else self.cwd
 		comps = path_components(path)
 
 		if len(comps) > 0:
@@ -717,7 +769,9 @@ class Jemf(object):
 			elif should_exist and tgtcomp not in parent:
 				error("'%s' does not exist" % path)
 
-		return (parent, tgtcomp)
+		existing = parent[tgtcomp] if tgtcomp in parent else None
+
+		return (parent, tgtcomp, existing)
 
 	commands = []
 
@@ -854,7 +908,7 @@ class Jemf(object):
 	@writer([mk_path_arg("the directory to create")])
 	def mkdir(self, args):
 		"""create a new directory"""
-		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
+		parent, newname, _ = self.lookup_for_edit(args.path, should_exist=False)
 		d = Directory(parent)
 		parent[newname] = d
 
@@ -863,37 +917,61 @@ class Jemf(object):
 				   formatter_class=argparse.RawDescriptionHelpFormatter))
 	def create(self, args):
 		"""create a new file"""
-		parent, newname = self.lookup_for_edit(args.path, should_exist=False)
+		parent, newname, existing = self.lookup_for_edit(args.path, should_exist=None)
+		if existing is not None:
+			if not islink(existing):
+				error("'%s' already exists" % args.path)
+			# create on an existing broken symlink should
+			# try to create the file the link points to
+			parent, newname, _ = self.lookup_for_edit(existing.target,
+								  should_exist=False,
+								  override_cwd=parent)
+
 		if args.generate is None:
-			parent[newname] = File(confirmed_getpass("data for %s" % args.path))
+			newdata = confirmed_getpass("data for %s" % args.path)
 		else:
-			parent[newname] = File(generate_data(args.generate))
+			newdata = generate_data(args.generate)
+
+		parent[newname] = File(newdata)
 
 	@writer([generate_arg, mk_path_arg("the file to edit")],
 		parser_kwargs=dict(epilog=gen_constraints_desc,
 				   formatter_class=argparse.RawDescriptionHelpFormatter))
 	def edit(self, args):
 		"""edit an existing file"""
-		parent, tgtname = self.lookup_for_edit(args.path, should_exist=True)
-		if not isfile(parent[tgtname]):
+		editfile = self.lookup_path(args.path)
+
+		if not isfile(editfile):
 			error("'%s' is not a file" % args.path)
 
 		if args.generate is None:
-			parent[tgtname] = File(confirmed_getpass("new data for %s" % args.path))
+			newdata = confirmed_getpass("new data for %s" % args.path)
 		else:
-			parent[tgtname] = File(generate_data(args.generate))
+			newdata = generate_data(args.generate)
+
+		editfile.data = newdata
+		editfile.touch()
 
 	@writer([force_overwrite_arg,
 		 (("frompath",), dict(metavar="FROM", help="current path/name")),
 		 (("topath",), dict(metavar="TO", help="new path/name"))])
 	def mv(self, args):
 		"""move/rename a file or directory"""
-		curparent, objname = self.lookup_for_edit(args.frompath, should_exist=True)
-		obj = curparent[objname]
+		curparent, objname, obj = self.lookup_for_edit(args.frompath, should_exist=True)
 		topath = args.topath
-		newparent, newobjname = self.lookup_for_edit(topath, should_exist=None)
-		if newobjname in newparent and isdir(newparent[newobjname]):
-			newparent = newparent[newobjname]
+		newparent, newobjname, victim = self.lookup_for_edit(topath, should_exist=None)
+
+		# If topath is a symlink to a directory, move frompath
+		# into the pointed-to directory.  (If topath is a
+		# symlink to file or a broken symlink however, just
+		# replace the link itself with frompath.)
+
+		if victim is not None and islink(victim):
+			victim = self.lookup_path(victim.target,
+						  noexc=True, override_cwd=newparent)
+
+		if victim is not None and isdir(victim):
+			newparent = victim
 			newobjname = objname
 			topath = os.path.join(args.topath, objname)
 
@@ -913,6 +991,28 @@ class Jemf(object):
 		newparent[newobjname] = obj
 		del curparent[objname]
 
+	@writer([(("target",), dict(help="link target")),
+		 (("linkpath",), dict(help="link to create"))])
+	def ln(self, args):
+		"""create a symlink"""
+		parent, newname, obj = self.lookup_for_edit(args.linkpath, should_exist=None)
+		if obj is not None and islink(obj):
+			obj = self.lookup_path(obj.target, override_cwd=parent)
+
+		if obj is not None:
+			# if linkpath is a directory (or a symlink to one),
+			# create the symlink linkpath/basename(target) instead
+			if isdir(obj):
+				parent = obj
+				newname = path_components(args.target)[-1]
+			else:
+				error("'%s' exists" % args.linkpath)
+
+		if newname in parent:
+			error("'%s' exists" % args.linkpath)
+
+		parent[newname] = Symlink(args.target)
+
 	@writer([(("-r", "--recursive"), dict(help="recursively delete directory contents",
 					      action="store_true")),
 		 mk_path_arg("the file or directory to delete", multiple_ok=True)])
@@ -920,8 +1020,7 @@ class Jemf(object):
 		"""delete a file or directory"""
 		errors = []
 		for path in args.paths:
-			parent, tgtname = self.lookup_for_edit(path, should_exist=True)
-			obj = parent[tgtname]
+			parent, tgtname, obj = self.lookup_for_edit(path, should_exist=True)
 			if obj is self.data:
 				errors.append("can't delete '%s'" % os.sep)
 			elif isdir(obj) and len(obj.dentries) > 0 and not args.recursive:
@@ -972,12 +1071,19 @@ class Jemf(object):
 			timefmt = "%Y-%m-%d %H:%M:%S"
 			def fmtitem(item):
 				name, obj = item
+				main = name
+				if isdir(obj):
+					main += os.path.sep
+
 				if args.long:
-					m = time.strftime(timefmt, time.localtime(obj.mtime))
-					m += " %s  %*s  " % (obj.mtzname, hostlen, obj.mhost)
+					pfx = time.strftime(timefmt, time.localtime(obj.mtime))
+					pfx += " %s  %*s  " % (obj.mtzname, hostlen, obj.mhost)
+					if islink(obj):
+						main += " -> %s" % obj.target
 				else:
-					m = ""
-				return "%s%s%s" % (m, name, os.path.sep if isdir(obj) and name[-1] != os.path.sep else "")
+					pfx = ""
+
+				return pfx + main
 			return '\n'.join(fmtitem(i) for i in objs if not isdot(i[0]) or args.all) + '\n'
 
 		objs = [(path, obj)] if isfile(obj) or args.directory else sorted(obj.items())
