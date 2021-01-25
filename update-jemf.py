@@ -16,6 +16,18 @@
 # - v2:
 #   - per-file/directory metadata mandatory instead of optional
 #   - explicit format_version record in top-level metadata (integer)
+#
+# - v3: unified representation:
+#   - all files and directories are now maps with common metadata:
+#     - mhost, mtime, and mtzname as in v2
+#     - type:
+#       - 'd' for directories
+#       - 'f' for files
+#       - 'l' for symlinks (new)
+#   - each type has one additional key for its contents:
+#     - directories: "entries" (map)
+#     - files: "data" (string)
+#     - symlinks: "target" (string)
 
 import sys
 import json
@@ -45,10 +57,41 @@ def ensure_v2(fs):
 
 	return (fs, True)
 
+def v2_to_v3(fs):
+	if fs["metadata"].get("format_version", 0) >= 3:
+		return (fs, False)
+
+	def convert_objects(item):
+		assert(isinstance(item, list))
+		assert(len(item) == 2)
+
+		content, metadata = item
+
+		assert(isinstance(metadata, dict))
+		assert(sorted(metadata.keys()) == ["mhost", "mtime", "mtzname"])
+
+		newobj = metadata
+		if isinstance(content, str):
+			newobj["type"] = 'f'
+			newobj["data"] = content
+		elif isinstance(content, dict):
+			newobj["type"] = 'd'
+			newobj["entries"] = { k: convert_objects(v) for k, v in content.items() }
+		else:
+			raise ValueError("unexpected content type %s" % type(content))
+
+		return newobj
+
+	fs["data"] = convert_objects(fs["data"])
+	fs["metadata"]["format_version"] = 3
+
+	return (fs, True)
+
 version_funcs = [
 	None,
 	None, # v1 is fully backwards-compatible with v0
 	ensure_v2,
+	v2_to_v3,
 ]
 
 assert jemf.CURRENT_FORMAT_VERSION == len(version_funcs) - 1

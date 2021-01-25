@@ -42,7 +42,7 @@ gpgcmd = "gpg2"
 
 debugmode = os.getenv("JEMF_DEBUG") is not None
 
-CURRENT_FORMAT_VERSION = 2
+CURRENT_FORMAT_VERSION = 3
 
 # Python 2/3 compat stuff
 if hasattr(os, "pipe2"):
@@ -128,16 +128,10 @@ def find_fs():
 
 class JemfJSONEncoder(json.JSONEncoder):
 	def default(self, obj):
-		# make sure we're not propagating any relics of old
-		# format versions
-		if isinstance(obj, (File, Directory)):
-			assert obj.metadata is not None
-
-		if isinstance(obj, File):
-			return [obj.data, obj.metadata.to_json_obj()]
-		elif isinstance(obj, Directory):
-			return [obj.dentries, obj.metadata.to_json_obj()]
-		return json.JSONEncoder.default(self, obj)
+		if isinstance(obj, FSObj):
+			return obj.to_json_obj()
+		else:
+			return json.JSONEncoder.default(self, obj)
 
 def pretty_json_dump(d):
 	return json.dumps(d, sort_keys=True, indent=4, separators=(',', ': '), cls=JemfJSONEncoder)
@@ -298,55 +292,69 @@ def recursive_list(obj, pfx, fileonly=False, skip_dots=True):
 					    skip_dots=skip_dots)
 	return l
 
-class Metadata(object):
-	def __init__(self, mtime, mtzname, mhost):
-		self.mtime = mtime
-		self.mtzname = mtzname
-		self.mhost = mhost
-
-	@classmethod
-	def herenow(cls):
-		return cls(time.time(), time.tzname[time.daylight], get_hostname())
-
-	@classmethod
-	def from_json_obj(cls, d):
-		if not (isinstance(d, dict)
-		        and len(d) == 3
-		        and all(k in d for k in ["mtime", "mtzname", "mhost"])
-		        and isinstance(d["mtime"], float)
-		        and all(isinstance(d[k], str) for k in ["mtzname", "mhost"])):
-			raise CorruptFS("Invalid metadata object")
-		return cls(d["mtime"], d["mtzname"], d["mhost"])
-
-	def to_json_obj(self):
-		return dict(mtime=self.mtime, mtzname=self.mtzname, mhost=self.mhost)
+def extract(jd, key, expected):
+	if key not in jd:
+		raise CorruptFS("missing %s" % key)
+	tmp = jd.pop(key)
+	if not isinstance(tmp, expected):
+		raise CorruptFS("invalid %s (%s)" % (key, type(tmp).__name__))
+	return tmp
 
 class FSObj(object):
-	def __init__(self):
-		self.metadata = Metadata.herenow()
+	def __init__(self, init_metadata=True):
+		self.mtime = None
+		self.mtzname = None
+		self.mhost = None
+		if init_metadata:
+			self.touch()
 
 	def touch(self):
-		self.metadata = Metadata.herenow()
+		self.mtime = time.time()
+		self.mtzname = time.tzname[time.daylight]
+		self.mhost = get_hostname()
+
+	def _fill_from_json_obj(self, jd):
+		self.mtime = extract(jd, "mtime", float)
+		self.mtzname = extract(jd, "mtzname", str)
+		self.mhost = extract(jd, "mhost", str)
+
+	def to_json_obj(self):
+		return dict(mtime=self.mtime, mtzname=self.mtzname, mhost=self.mhost,
+			    type=self.type_id)
 
 class File(FSObj):
-	def __init__(self, data):
-		super().__init__()
+	type_id = 'f'
+
+	def __init__(self, data, init_metadata=True):
+		super().__init__(init_metadata)
 		self.data = data
 
+	def _fill_from_json_obj(self, jd):
+		super()._fill_from_json_obj(jd)
+		self.data = extract(jd, "data", str)
+		if len(jd) > 0:
+			raise CorruptFS("extra keys in file object: %s"
+					% ", ".join(jd.keys()))
+
 	@classmethod
-	def from_json_obj(cls, o):
-		if isinstance(o, list):
-			if len(o) != 2:
-				raise CorruptFS("Invalid file object")
-			f = cls(o[0])
-			f.metadata = Metadata.from_json_obj(o[1])
-			return f
-		else:
-			raise CorruptFS("Invalid file object")
+	def from_json_obj(cls, jd):
+		if not isinstance(jd, dict):
+			raise CorruptFS("invalid file object (%s)" % type(jd).__name__)
+
+		f = File(None, init_metadata=False)
+		f._fill_from_json_obj(jd)
+		return f
+
+	def to_json_obj(self):
+		d = super().to_json_obj()
+		d["data"] = self.data
+		return d
 
 class Directory(FSObj):
-	def __init__(self, parent):
-		super().__init__()
+	type_id = 'd'
+
+	def __init__(self, parent, init_metadata=True):
+		super().__init__(init_metadata)
 		if parent is None:
 			parent = self
 		else:
@@ -354,27 +362,38 @@ class Directory(FSObj):
 		self._specials = {os.path.curdir: self, os.path.pardir: parent}
 		self.dentries = {}
 
+	def _fill_from_json_obj(self, jd):
+		for name, item in extract(jd, "entries", dict).items():
+			t = extract(item, "type", str)
+			if t == 'f':
+				obj = File.from_json_obj(item)
+			elif t == 'd':
+				obj = Directory.from_json_obj(item, parent=self)
+			else:
+				raise CorruptFS("invalid object type: %s" % t)
+			self[name] = obj
+
+		# do this last so as to clobber metadata updates done
+		# automatically while adding dirents
+		super()._fill_from_json_obj(jd)
+
+		if len(jd) > 0:
+			raise CorruptFS("extra keys in directory object: %s"
+					% ", ".join(jd.keys()))
+
 	@classmethod
-	def from_json_obj(cls, o, parent=None):
-		if isinstance(o, list):
-			if len(o) != 2:
-				raise CorruptFS("Invalid directory object")
+	def from_json_obj(cls, jd, parent=None):
+		if not isinstance(jd, dict):
+			raise CorruptFS("invalid directory object (%s)" % type(jd).__name__)
 
-			d = cls(parent)
-			for name, obj in o[0].items():
-				if isinstance(obj, list) and isinstance(obj[0], dict):
-					obj = Directory.from_json_obj(obj, d)
-				elif isinstance(obj, list) and isinstance(obj[0], str):
-					obj = File.from_json_obj(obj)
-				else:
-					raise CorruptFS("Invalid object")
-				d[name] = obj
+		d = Directory(parent, init_metadata=False)
+		d._fill_from_json_obj(jd)
+		return d
 
-			# clobber metadata updates done automatically while filling in dirents
-			d.metadata = Metadata.from_json_obj(o[1])
-			return d
-		else:
-			raise CorruptFS("Invalid directory object")
+	def to_json_obj(self):
+		d = super().to_json_obj()
+		d["entries"] = self.dentries
+		return d
 
 	def __getitem__(self, k):
 		if k in self._specials:
@@ -565,14 +584,23 @@ class Jemf(object):
 
 	def _from_json(self, s):
 		jd = json.loads(s)
-		self.metadata = jd.pop("metadata")
+		self.metadata = extract(jd, "metadata", dict)
 
 		fileversion = self.metadata.get("format_version", 1)
 		if fileversion < CURRENT_FORMAT_VERSION:
 			raise FormatVersionMismatch("data is in v%d format, we need v%d"
 						    % (fileversion, CURRENT_FORMAT_VERSION))
 
-		self.data = Directory.from_json_obj(jd.pop("data"))
+		data = extract(jd, "data", dict)
+		t = extract(data, "type", str)
+		if t != 'd':
+			raise CorruptFS("root entry must be a directory, got '%s'" % t)
+		self.data = Directory.from_json_obj(data)
+
+		if len(jd):
+			raise CorruptFS("extra keys in top level: %s"
+					% ", ".join(jd.keys()))
+
 		self.cwd = self.data
 
 	@classmethod
@@ -939,17 +967,14 @@ class Jemf(object):
 			if len(objs) == 0:
 				return ''
 			# longest mhost length
-			hostlen = max(len(o[1].metadata.mhost) if o[1].metadata else 0 for o in objs)
+			hostlen = max(len(o[1].mhost) for o in objs)
 			nometa = "????-??-?? ??:??:?? ???"
 			timefmt = "%Y-%m-%d %H:%M:%S"
 			def fmtitem(item):
 				name, obj = item
 				if args.long:
-					if obj.metadata:
-						m = time.strftime(timefmt, time.localtime(obj.metadata.mtime))
-						m += " %s  %*s  " % (obj.metadata.mtzname, hostlen, obj.metadata.mhost)
-					else:
-						m = "%s  %*s  " % (nometa, hostlen, "?")
+					m = time.strftime(timefmt, time.localtime(obj.mtime))
+					m += " %s  %*s  " % (obj.mtzname, hostlen, obj.mhost)
 				else:
 					m = ""
 				return "%s%s%s" % (m, name, os.path.sep if isdir(obj) and name[-1] != os.path.sep else "")
