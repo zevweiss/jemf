@@ -97,11 +97,11 @@ def getpass_gui(prompt):
 		 zenity_args + ["--entry", "--hide-text", "--text"]]
 	for p in progs:
 		try:
-			p = subprocess.Popen(p + [prompt], stdout=subprocess.PIPE)
+			proc = subprocess.Popen(p + [prompt], stdout=subprocess.PIPE)
 		except OSError as ose:
 			continue
-		output = p.communicate()[0].decode("utf-8")
-		if p.wait() == 0:
+		output = proc.communicate()[0].decode("utf-8")
+		if proc.wait() == 0:
 			assert output[-1] == '\n'
 			return output[:-1]
 
