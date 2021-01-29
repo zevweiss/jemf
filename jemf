@@ -622,9 +622,74 @@ def mk_path_arg(desc, opt=False, multiple_ok=False):
 		d["nargs"] = '?'
 	return (("path%s" % ("s" if multiple_ok else ""),), d)
 
+_jemf_commands = []
+
+# inner decorator for methods implementing commands
+def _jemf_command(fn, **kwargs):
+	method = lambda f: types.MethodType(f, fn)
+
+	@method
+	def add_to(self, subparsers):
+		self.parser = subparsers.add_parser(self.name, description=self.desc,
+						    help=self.desc, add_help=False, **self.parser_kwargs)
+		self.parser.set_defaults(action=self)
+		for a in self.cmd_args:
+			self.parser.add_argument(*a[0], **a[1])
+
+		# Custom help argument that doesn't unconditionally exit
+		# (so that we can avoid exiting when --help is passed to
+		# a command in shell mode).
+		self.parser.add_argument('-h', "--help", action=JemfHelpAction, default=argparse.SUPPRESS,
+					 nargs=0, help="show this help message")
+
+	@method
+	def create_parser(self):
+		tmp = argparse.ArgumentParser().add_subparsers()
+		self.add_to(tmp)
+
+	# supply default command attributes
+	attrs = dict(cmd_args = [],
+		     parser_kwargs = {},
+		     batch_only = False,
+		     shell_only = False,
+		     name = fn.__name__,
+		     desc = fn.__doc__,
+		     add_to = add_to,
+		     create_parser = create_parser)
+
+	# defaults overridable via @reader()/@writer kwargs
+	attrs.update(kwargs)
+
+	for a, v in attrs.items():
+		setattr(fn, a, v)
+
+	_jemf_commands.append(fn)
+
+	return fn
+
+# decorator for commands that modify the FS
+def _jemf_write_command(cmd_args, **kwargs):
+	def wr_dec(fn):
+		@functools.wraps(fn)
+		def new_fn(self, *args, **kwargs):
+			fn(self, *args, **kwargs)
+			self._write_out()
+		return _jemf_command(new_fn, cmd_args=cmd_args, **kwargs)
+	return wr_dec
+
+# decorator for read-only commands
+def _jemf_read_command(cmd_args, **kwargs):
+	def rd_dec(fn):
+		return _jemf_command(fn, cmd_args=cmd_args, **kwargs)
+	return rd_dec
+
 SOCKBUF_SIZE = 1024
 
 class Jemf(object):
+	reader = _jemf_read_command
+	writer = _jemf_write_command
+	commands = _jemf_commands
+
 	def __init__(self, filename, password):
 		self.filename = filename
 		self.password = password
@@ -797,80 +862,6 @@ class Jemf(object):
 		existing = parent[tgtcomp] if tgtcomp in parent else None
 
 		return (parent, tgtcomp, existing)
-
-	commands = []
-
-	# parameterized meta-decorator...deep magic
-	def _bind_args(**bound_kwargs):
-		def new_decorator(orig_decorator):
-			@functools.wraps(orig_decorator)
-			def new_cmd_method(orig_cmd_method, *args, **kwargs):
-				kwargs.update(bound_kwargs)
-				return orig_decorator(orig_cmd_method, *args, **kwargs)
-			return new_cmd_method
-		return new_decorator
-
-	# inner decorator for methods implementing commands
-	@_bind_args(cmdlist=commands)
-	def _command(fn, cmdlist, **kwargs):
-		method = lambda f: types.MethodType(f, fn)
-
-		@method
-		def add_to(self, subparsers):
-			self.parser = subparsers.add_parser(self.name, description=self.desc,
-							    help=self.desc, add_help=False, **self.parser_kwargs)
-			self.parser.set_defaults(action=self)
-			for a in self.cmd_args:
-				self.parser.add_argument(*a[0], **a[1])
-
-			# Custom help argument that doesn't unconditionally exit
-			# (so that we can avoid exiting when --help is passed to
-			# a command in shell mode).
-			self.parser.add_argument('-h', "--help", action=JemfHelpAction, default=argparse.SUPPRESS,
-						 nargs=0, help="show this help message")
-
-		@method
-		def create_parser(self):
-			tmp = argparse.ArgumentParser().add_subparsers()
-			self.add_to(tmp)
-
-		# supply default command attributes
-		attrs = dict(cmd_args = [],
-			     parser_kwargs = {},
-			     batch_only = False,
-			     shell_only = False,
-			     name = fn.__name__,
-			     desc = fn.__doc__,
-			     add_to = add_to,
-			     create_parser = create_parser)
-
-		# defaults overridable via @reader()/@writer kwargs
-		attrs.update(kwargs)
-
-		for a, v in attrs.items():
-			setattr(fn, a, v)
-
-		cmdlist.append(fn)
-
-		return fn
-
-	# decorator for commands that modify the FS
-	@_bind_args(inner_decorator=_command)
-	def writer(cmd_args, inner_decorator, **kwargs):
-		def wr_dec(fn):
-			@functools.wraps(fn)
-			def new_fn(self, *args, **kwargs):
-				fn(self, *args, **kwargs)
-				self._write_out()
-			return inner_decorator(new_fn, cmd_args=cmd_args, **kwargs)
-		return wr_dec
-
-	# decorator for read-only commands
-	@_bind_args(inner_decorator=_command)
-	def reader(cmd_args, inner_decorator, **kwargs):
-		def rd_dec(fn):
-			return inner_decorator(fn, cmd_args=cmd_args, **kwargs)
-		return rd_dec
 
 	# some common flags
 	generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
