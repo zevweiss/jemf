@@ -87,6 +87,9 @@ runtest "mkdir" jemf mkdir d
 runtest "ls with single top-level entry" jemf ls
 runtest "single-item ls output" [ "$TEST_OUTPUT" = "d/" ]
 
+runtest "find on subdirectory" jemf find d
+runtest "find on root" jemf find /
+
 runtest -n "mkdir when directory exists" jemf mkdir d
 
 runtest "create file" jemf create -g L10 d/f1
