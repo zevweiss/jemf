@@ -285,7 +285,7 @@ def generate_data(constraints):
 	return ''.join(l[:cdict['L']])
 
 def isdot(p):
-	return p[0] == '.' and p not in [".", ".."]
+	return p.startswith('.') and p not in [".", ".."]
 
 def recursive_list(obj, pfx, fileonly=False, skip_dots=True):
 	l = []
