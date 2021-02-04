@@ -1126,11 +1126,17 @@ class Jemf(object):
 			assert out[-1] == '\n'
 			return out[:-1]
 
-	@reader([force_print_arg,
+	@reader([mk_path_arg("path to select beneath (default: .)", opt=True), force_print_arg,
 		 (("-a", "--all"), dict(help="don't skip entries starting with '.'", action="store_true"))])
 	def menu(self, args):
 		"""print a file selected from a menu (requires `dmenu')"""
-		paths = recursive_list(self.cwd, os.path.curdir, fileonly=True, skip_dots=not args.all)
+		if args.path is None:
+			prefix = os.path.curdir
+			top = self.cwd
+		else:
+			prefix = args.path
+			top = self.lookup_path(prefix)
+		paths = recursive_list(top, prefix, fileonly=True, skip_dots=not args.all)
 		selected = self._menu_select(sorted(paths))
 		if selected is None:
 			print("(Nothing selected.)", file=sys.stderr)
