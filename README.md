@@ -12,7 +12,7 @@ Whence the 'j'?  Take your pick of:
 ### Requirements
 
   - Python 3
-  - gpg
+  - gpg2
 
 ### Installation
 
