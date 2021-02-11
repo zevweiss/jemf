@@ -30,6 +30,7 @@ import base64
 import hashlib
 import atexit
 import re
+import struct
 
 try:
 	import readline
@@ -1365,6 +1366,25 @@ def serve_client(client, fs):
 				for line in lines[:-1]:
 					serve_request(line, fs, client)
 
+# format of the struct ucred that SO_PEERCRED provides (i32 pid_t
+# followed by u32 uid_t & gid_t)
+UCRED_FMT = "iII"
+
+# return a (pid, uid, gid) tuple of the local socket's peer
+def getpeercred(sock):
+	pc = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize(UCRED_FMT))
+	return struct.unpack(UCRED_FMT, pc)
+
+def check_client(sock):
+	pid, uid, gid = getpeercred(sock)
+
+	# filesystem permissions *should* prevent other users from
+	# being able to access the socket, but...belt and suspenders
+	if uid != os.getuid() or gid != os.getgid():
+		return False
+
+	return True
+
 def serve_fs(fs, timeout):
 	srvsock = get_socket(fs.filename)
 
@@ -1424,12 +1444,13 @@ def serve_fs(fs, timeout):
 					else:
 						raise
 
-				signal.alarm(0)
+				if check_client(client):
+					signal.alarm(0)
 
-				try:
-					serve_client(client, fs)
-				except:
-					os._exit(1)
+					try:
+						serve_client(client, fs)
+					except:
+						os._exit(1)
 				client.close()
 		except:
 			try:
