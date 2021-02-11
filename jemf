@@ -1371,8 +1371,18 @@ def serve_fs(fs, timeout):
 	# output if it then gets flushed by both processes)
 	sys.stdout.flush()
 
+	# create a pipe so the parent can block until the child
+	# notifies it that it's ready and listening (by closing the
+	# write end)
+	ready_r, ready_w = pipe()
+
 	pid = os.fork()
-	if pid == 0:
+	if pid != 0:
+		os.close(ready_w)
+		os.read(ready_r, 1)
+		os.close(ready_r)
+	else:
+		os.close(ready_r)
 		for f in [sys.stdin, sys.stdout, sys.stderr]:
 			f.close()
 		fd = os.open("/dev/null", os.O_RDWR)
@@ -1398,6 +1408,8 @@ def serve_fs(fs, timeout):
 
 		signal.signal(signal.SIGTERM, exit_handler)
 		signal.signal(signal.SIGALRM, exit_handler)
+
+		os.close(ready_w)
 
 		try:
 			while True:
