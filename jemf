@@ -1260,6 +1260,8 @@ def new_jemf_fs(args):
 	if os.path.exists(args.fsfile) and not args.force:
 		error("%s exists (use -f to force reinitialization)" % args.fsfile)
 
+	lock_fsfile(args.fsfile)
+
 	# It'd be nice if python had a do-while loop...
 	password = ""
 	while password == "":
