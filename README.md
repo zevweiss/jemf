@@ -80,6 +80,17 @@ root directory of the (mini-)filesystem; `metadata` stores a format
 revision number (currently 3) as well as the timestamp, timezone, and
 hostname of the last modification made to the filesystem as a whole.
 
+### Format versions
+
+The exact format of the JSON file in which jemf stores its data has
+evolved somewhat over time; it will complain if the format revision of
+the file does not match that of the program itself.  The
+`update-jemf.py` script can be used to update an existing file from an
+older format revision to a newer one (run `./update-jemf.py --help`
+for usage information).  Note that it updates the file in place; you
+are strongly encouraged to make a backup of your existing file in case
+anything goes awry with the update procedure.
+
 ### License
 
 jemf is licensed under the terms of the ISC License (see `LICENSE`).
