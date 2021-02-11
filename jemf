@@ -45,11 +45,9 @@ debugmode = os.getenv("JEMF_DEBUG") is not None
 
 CURRENT_FORMAT_VERSION = 3
 
-# Python 2/3 compat stuff
-if hasattr(os, "pipe2"):
-	pipe = lambda: os.pipe2(0)
-else:
-	pipe = os.pipe
+# python3's os.pipe() sets O_CLOEXEC, which we don't want
+def pipe():
+	return os.pipe2(0)
 
 class UserError(Exception):
 	pass
