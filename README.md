@@ -14,6 +14,12 @@ Whence the 'j'?  Take your pick of:
   - Python 3
   - gpg2
 
+Optional extra programs for GUI integration:
+
+ - dmenu
+ - zenity/xmessage/gxmessage
+ - ssh-askpass/gnome-ssh-askpass
+
 ### Installation
 
 Put the `jemf` executable wherever you like (presumably somewhere in your
