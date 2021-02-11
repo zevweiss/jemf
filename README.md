@@ -11,7 +11,7 @@ Whence the 'j'?  Take your pick of:
 
 ### Requirements
 
-  - Python 2.7/3.2+
+  - Python 3
   - gpg
 
 ### Installation
