@@ -66,10 +66,19 @@ specify the constraints.
 ### Data storage
 
 jemf stores data in a single JSON file symmetrically encrypted under a
-master passphrase via gpg.  Directories are stored as JSON objects; files
-are simply strings.  The top-level structure of the file is a dictionary
-with two elements, `data` and `metadata`, with the former being the root
-directory of the (mini-)filesystem.
+master passphrase via gpg.  Each jemf filesystem object (file,
+directory, or symlink) is stored as a JSON object, each of which has a
+set of common metadata fields that indicate what type of object it is
+(`type`) and record the timestamp, time zone, and hostname of its last
+modification (`mtime`, `mtzname`, and `mhost`, respectively).  Each
+type has one additional type-specific field: `entries` for directories
+(an object mapping names to other filesystem objects), `data` for
+files (a string of its contents), and `target` for symlinks (the path
+the symlink points to).  The top-level structure of the JSON file is
+an object with two elements, `data` and `metadata`.  `data` is the
+root directory of the (mini-)filesystem; `metadata` stores a format
+revision number (currently 3) as well as the timestamp, timezone, and
+hostname of the last modification made to the filesystem as a whole.
 
 ### License
 
