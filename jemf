@@ -1238,8 +1238,9 @@ def lock_fsfile(fspath):
 	global unlock_hook
 	unlock_hook = atexit.register(lambda: os.unlink(lockpath))
 
-def open_jemf_fs(args):
-	lock_fsfile(args.fsfile)
+def open_jemf_fs(args, skip_locking=False):
+	if not skip_locking:
+		lock_fsfile(args.fsfile)
 
 	# First try to open via a persistent server process
 	sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -1254,11 +1255,12 @@ def open_jemf_fs(args):
 	password = getpass("Enter password for %s: " % args.fsfile)
 	return Jemf.load_from_path(args.fsfile, password)
 
-def new_jemf_fs(args):
+def new_jemf_fs(args, skip_locking=False):
 	if os.path.exists(args.fsfile) and not args.force:
 		error("%s exists (use -f to force reinitialization)" % args.fsfile)
 
-	lock_fsfile(args.fsfile)
+	if not skip_locking:
+		lock_fsfile(args.fsfile)
 
 	# It'd be nice if python had a do-while loop...
 	password = ""
@@ -1494,13 +1496,13 @@ def main():
 	ctor = new_jemf_fs if doing_mkfs else open_jemf_fs
 	try:
 		jfs = ctor(args)
+		if args.persist > 0 and jfs.socket is None:
+			serve_fs(jfs, args.persist)
+			jfs = ctor(args, skip_locking=True)
 		args.action(jfs, args)
 	except KeyboardInterrupt:
 		sys.stdout.write("^C\n")
 		exit(1)
-
-	if args.persist > 0 and jfs.socket is None:
-		serve_fs(jfs, args.persist)
 
 if __name__ == "__main__":
 	try:
