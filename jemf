@@ -1471,6 +1471,8 @@ def serve_fs(fs, timeout):
 						serve_client(client, fs)
 					except:
 						os._exit(1)
+				else:
+					client.sendall(err_resp("access denied"))
 				client.close()
 		except:
 			try:
