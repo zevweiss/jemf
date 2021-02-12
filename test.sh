@@ -102,21 +102,21 @@ runtest "path lookup with '.'" jemf cat d/./f1
 runtest "path lookup with '..'" jemf cat d/../d/f1
 
 runtest "create symlink to file" jemf ln d/f1 l1
-runtest "read file through symlink" jemf cat -f l1
+runtest "read file through symlink" jemf cat l1
 
 l1="$TEST_OUTPUT"
 runtest "symlink read data" [ "$l1" = "$df1" ]
 runtest "rm symlink to file" jemf rm l1
 
 runtest "create symlink to directory" jemf ln d dl
-runtest "read file through directory symlink" jemf cat -f dl/f1
+runtest "read file through directory symlink" jemf cat dl/f1
 
 dlf1="$TEST_OUTPUT"
 runtest "directory link read data" [ "$dlf1" = "$df1" ]
 runtest "rm symlink to directory" jemf rm dl
 
 runtest "create broken symlink" jemf ln missing bl
-runtest -n "read from broken symlink" jemf cat -f bl
+runtest -n "read from broken symlink" jemf cat bl
 runtest -n "mkdir over broken symlink" jemf mkdir bl
 runtest "rm broken symlink" jemf rm bl
 
