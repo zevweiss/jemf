@@ -55,7 +55,7 @@ runtest()
 	label="$1"
 	shift 1
 
-	printf '%-40s ' "$label:"
+	printf '%-60s ' "$label:"
 
 	((++ntests))
 
