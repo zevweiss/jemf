@@ -665,6 +665,7 @@ class Jemf(object):
 			raise CorruptFS("data/metadata not found")
 		return fs
 
+	# return a (success-boolean, data) tuple
 	def recv_response(self):
 		buf = b''
 		while len(buf) == 0 or buf[-1] != b'\n'[0]:
@@ -674,17 +675,22 @@ class Jemf(object):
 			else:
 				buf += t
 		parts = buf[:-1].decode("utf-8").split(' ', 1)
-		if len(parts) == 1:
-			parts += [None]
-		return parts
+		data = None if len(parts) == 1 else parts[1]
+		if parts[0] == "OK":
+			status = True
+		elif parts[0] == "ERROR":
+			status = False
+		else:
+			raise Exception("invalid response from server: %s" % buf)
+		return (status, data)
 
 	@classmethod
 	def from_server(cls, socket, filename):
 		fs = cls(filename, None)
 		fs.socket = socket
 		fs.socket.sendall(b"%s %s\n" % (READ_REQ, base64.b64encode(filename.encode("utf-8"))))
-		resp, data = fs.recv_response()
-		if resp == "OK":
+		ok, data = fs.recv_response()
+		if ok:
 			fs._from_json(base64.b64decode(data).decode("utf-8"))
 			return fs
 		else:
@@ -715,8 +721,8 @@ class Jemf(object):
 			self.socket.sendall(b"%s %s %s\n" % (WRITE_REQ,
 							     base64.b64encode(self.filename.encode("utf-8")),
 							     base64.b64encode(jemf_buf)))
-			resp, data = self.recv_response()
-			if resp == "OK":
+			ok, data = self.recv_response()
+			if ok:
 				return
 			else:
 				raise Exception(data)
