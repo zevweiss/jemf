@@ -60,6 +60,19 @@ shell, not jemf's shell) to which file contents are sent instead of stdout
 (something like `xsel`, `xclip`, or `pbcopy` would again probably be a
 useful choice here).
 
+##### Persist mode
+
+When invoked with the `-P $NUM` flag, jemf will leave the filesystem
+unlocked until it is idle (not accessed) for `$NUM` seconds.  This is
+implemented by forking a background server process that retains the
+master passphrase and allows a client instace of jemf to retrieve and
+update the contents of the filesystem via a UNIX-domain socket.  Any
+invocation of jemf will first attempt to connect to a running server
+started by a previous instance run with `-P`, falling back to direct
+access only if there isn't one running.  The server process uses an
+`ssh-add -c`-style interactive confirmation prompt to allow or deny
+access to each client that connects.
+
 ##### Data generation
 
 `jemf create` and `jemf edit` feature a flag (`-g`) that allows automatic
