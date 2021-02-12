@@ -24,7 +24,7 @@ Optional extra programs for GUI integration:
 
 Put the `jemf` executable wherever you like (presumably somewhere in your
 `$PATH`).  If for some reason your python interpreter isn't at
-`/usr/bin/python`, you may want to edit the shebang line accordingly
+`/usr/bin/python3`, you may want to edit the shebang line accordingly.
 
 ### Usage
 
@@ -34,10 +34,11 @@ files may each contain only a single line of text.
 
 jemf operates via subcommands.  `jemf mkfs` initializes an empty
 filesystem, after which you can use further subcommands to create
-directories (`jemf mkdir`) and files (`jemf create`) within it.  The
-contents of a file can be written to stdout with `jemf cat`; this can then
-of course be piped into a clipboard manager (e.g. `xsel`/`xclip` on X11,
-`pbcopy` on Mac OS X) for convenient pasting.
+directories (`jemf mkdir`), files (`jemf create`), and symlinks (`jemf
+ln`) within it.  The contents of a file can be written to stdout with
+`jemf cat`; this can then of course be piped into a clipboard manager
+(e.g. `xsel`/`xclip` on X11, `pbcopy` on Mac OS X) for convenient
+pasting.
 
 By default, so as to reduce the risk of accidental disclosure, jemf will
 refuse to print file contents to your terminal (though if you *really* want
