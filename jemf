@@ -107,6 +107,19 @@ def getpass_gui(prompt):
 getpass_interactive = getpass_tty
 errprint = errprint_tty
 
+def confirm_gui(prompt):
+	xmsg_flags = ["-buttons", "No:1,Yes:0", "-default", "Yes"]
+	progs = [zenity_args + ["--question", "--text"],
+		 ["gxmessage"] + xmsg_flags,
+		 ["xmessage"] + xmsg_flags]
+	for p in progs:
+		try:
+			ret = subprocess.call(p + [prompt])
+			return ret == 0
+		except:
+			pass
+	error("None of %s succeeded" % [p[0] for p in progs])
+
 def getpass(prompt):
 	if os.getenv("__JEMF_TEST__") == '1':
 		return os.getenv("__JEMF_TEST_PASSWORD__")
@@ -1383,7 +1396,14 @@ def check_client(sock):
 	if uid != os.getuid() or gid != os.getgid():
 		return False
 
-	return True
+	# We don't want to hassle with interactive confirmation if the
+	# client is our own parent (the original jemf process that
+	# forked the background server), which is typically the first
+	# client to connect, so allow a special-case bypass for it.
+	if pid == os.getppid():
+		return True
+
+	return confirm_gui("Allow jemf access for pid %d?" % pid)
 
 def serve_fs(fs, timeout):
 	srvsock = get_socket(fs.filename)
