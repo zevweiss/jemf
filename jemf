@@ -281,11 +281,15 @@ def constraints_to_dict(cstr):
 			d[c[0]] = int(c[1:])
 	return d
 
-def generate_data(constraints):
+def generate_data(constraints, punctuation_chars=None):
+	classes = char_classes.copy()
+	if punctuation_chars is not None:
+		classes['P'] = punctuation_chars
+
 	cdict = constraints_to_dict(default_constraints)
 	cdict.update(constraints_to_dict(constraints))
 	s, padchars = "", ""
-	for c, chars in char_classes.items():
+	for c, chars in classes.items():
 		for _ in range(0, cdict[c]):
 			s += random.choice(chars)
 		if cdict[c] > 0:
@@ -871,6 +875,9 @@ class Jemf(object):
 	# some common flags
 	generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
 						   help="auto-generate entry data"))
+	punctchars_arg = (("-P", "--punctuation-chars"), dict(metavar="CHARS", type=str,
+							      help="specify punctuation characters"
+							      " allowed in generated data"))
 	force_print_arg = (("-f", "--force"), dict(help="disable anti-tty-print interlock",
 						   action="store_true"))
 	force_overwrite_arg = (("-f", "--force"), dict(help="overwrite an existing file",
@@ -933,7 +940,7 @@ class Jemf(object):
 		d = Directory(parent)
 		parent[newname] = d
 
-	@writer([generate_arg, mk_path_arg("the file to create")],
+	@writer([generate_arg, punctchars_arg, mk_path_arg("the file to create")],
 		parser_kwargs=dict(epilog=gen_constraints_desc,
 				   formatter_class=argparse.RawDescriptionHelpFormatter))
 	def create(self, args):
@@ -951,11 +958,11 @@ class Jemf(object):
 		if args.generate is None:
 			newdata = confirmed_getpass("data for %s" % args.path)
 		else:
-			newdata = generate_data(args.generate)
+			newdata = generate_data(args.generate, args.punctuation_chars)
 
 		parent[newname] = File(newdata)
 
-	@writer([generate_arg, mk_path_arg("the file to edit")],
+	@writer([generate_arg, punctchars_arg, mk_path_arg("the file to edit")],
 		parser_kwargs=dict(epilog=gen_constraints_desc,
 				   formatter_class=argparse.RawDescriptionHelpFormatter))
 	def edit(self, args):
@@ -968,7 +975,7 @@ class Jemf(object):
 		if args.generate is None:
 			newdata = confirmed_getpass("new data for %s" % args.path)
 		else:
-			newdata = generate_data(args.generate)
+			newdata = generate_data(args.generate, args.punctuation_chars)
 
 		editfile.data = newdata
 		editfile.touch()
