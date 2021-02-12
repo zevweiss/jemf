@@ -59,6 +59,9 @@ class UsageError(UserError):
 class InternalError(Exception):
 	pass
 
+class ProtocolError(Exception):
+	pass
+
 class CorruptFS(Exception):
 	pass
 
@@ -671,7 +674,7 @@ class Jemf(object):
 		while len(buf) == 0 or buf[-1] != b'\n'[0]:
 			t = self.socket.recv(SOCKBUF_SIZE)
 			if len(t) == 0:
-				raise Exception("invalid response from server")
+				raise ProtocolError("invalid response from server")
 			else:
 				buf += t
 		parts = buf[:-1].decode("utf-8").split(' ', 1)
@@ -681,7 +684,7 @@ class Jemf(object):
 		elif parts[0] == "ERROR":
 			status = False
 		else:
-			raise Exception("invalid response from server: %s" % buf)
+			raise ProtocolError("invalid response from server: %s" % buf)
 		return (status, data)
 
 	@classmethod
@@ -694,7 +697,7 @@ class Jemf(object):
 			fs._from_json(base64.b64decode(data).decode("utf-8"))
 			return fs
 		else:
-			raise Exception(data)
+			raise ProtocolError(data)
 
 	def output_secret(self, s, force):
 		if self.pipe_to is None:
@@ -725,7 +728,7 @@ class Jemf(object):
 			if ok:
 				return
 			else:
-				raise Exception(data)
+				raise ProtocolError(data)
 		else:
 			update_fsfile(self.filename, self.password, jemf_buf)
 
@@ -1267,6 +1270,8 @@ def open_jemf_fs(args, skip_locking=False):
 	try:
 		sock.connect(get_sockpath(args.fsfile))
 		return Jemf.from_server(sock, args.fsfile)
+	except ProtocolError:
+		raise
 	except:
 		sock.close()
 
@@ -1560,7 +1565,7 @@ if __name__ == "__main__":
 		cmdname = cpe.cmd[0] if type(cpe.cmd) is list else cpe.cmd.split()[0]
 		print("[%s exited with status %d]" % (cmdname, cpe.returncode), file=sys.stderr)
 		exit(1)
-	except UserError as ue:
-		if ue.args[0]:
-			errprint(ue.args[0])
+	except (UserError, ProtocolError) as ex:
+		if ex.args[0]:
+			errprint(ex.args[0])
 		exit(1)
