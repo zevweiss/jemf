@@ -91,6 +91,7 @@ runtest "find on subdirectory" jemf find d
 runtest "find on root" jemf find /
 
 runtest -n "mkdir when directory exists" jemf mkdir d
+runtest -n "moving a directory into itself" jemf mv d d
 
 runtest "create file" jemf create -g L10 d/f1
 runtest "cat file" jemf cat d/f1
