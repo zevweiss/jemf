@@ -1244,7 +1244,7 @@ def lock_fsfile(fspath):
 					extra = "unable to determine owner: %s" % e2.strerror
 				error(base + extra)
 		else:
-			error("failed to lock %s: %s" % e.strerror)
+			error("failed to lock %s: %s" % (fspath, e.strerror))
 
 	# This handler remains registered in the foreground process in
 	# persist mode (i.e. the original process releases the lock
