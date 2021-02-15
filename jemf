@@ -484,6 +484,9 @@ def islink(obj):
 	assert isinstance(obj, FSObj)
 	return isinstance(obj, Symlink)
 
+def is_nonempty_dir(obj):
+	return isdir(obj) and len(obj.dentries) > 0
+
 ansi_red = "\x1b[31m"
 ansi_rst = "\x1b[m"
 
@@ -1004,7 +1007,7 @@ class Jemf(object):
 			existing = newparent[newobjname]
 			if not args.force:
 				error("'%s' exists (user '-f' to overwrite)" % topath)
-			elif isdir(existing) and len(existing.dentries) > 0:
+			elif is_nonempty_dir(existing):
 				error("'%s' is not empty" % topath)
 
 		newparent[newobjname] = obj
@@ -1042,7 +1045,7 @@ class Jemf(object):
 			parent, tgtname, obj = self.lookup_for_edit(path, should_exist=True)
 			if obj is self.data:
 				errors.append("can't delete '%s'" % os.sep)
-			elif isdir(obj) and len(obj.dentries) > 0 and not args.recursive:
+			elif is_nonempty_dir(obj) and not args.recursive:
 				errors.append("'%s' is not empty" % path)
 			else:
 				del parent[tgtname]
