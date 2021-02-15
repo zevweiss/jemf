@@ -327,10 +327,9 @@ def isdot(p: str) -> bool:
 def recursive_list(obj: 'FSObj', pfx: str, fileonly: bool=False, skip_dots: bool=True) -> List[str]:
 	l = []
 	skip = skip_dots and isdot(os.path.basename(pfx))
-	if (not fileonly or isfile(obj)) and not skip:
+	if (not fileonly or isinstance(obj, File)) and not skip:
 		l.append(pfx)
-	if isdir(obj) and not skip:
-		assert isinstance(obj, Directory) # mypy
+	if isinstance(obj, Directory) and not skip:
 		for n, o in obj.items():
 			l += recursive_list(o, os.path.join(pfx, n), fileonly=fileonly,
 					    skip_dots=skip_dots)
@@ -494,24 +493,8 @@ class Symlink(FSObj):
 		d["target"] = self.target
 		return d
 
-def isdir(obj: FSObj) -> bool:
-	assert isinstance(obj, FSObj)
-	return isinstance(obj, Directory)
-
-def isfile(obj: FSObj) -> bool:
-	assert isinstance(obj, FSObj)
-	return isinstance(obj, File)
-
-def islink(obj: FSObj) -> bool:
-	assert isinstance(obj, FSObj)
-	return isinstance(obj, Symlink)
-
 def is_nonempty_dir(obj: FSObj) -> bool:
-	if isdir(obj):
-		assert isinstance(obj, Directory) # mypy
-		return len(obj.dentries) > 0
-	else:
-		return False
+	return isinstance(obj, Directory) and len(obj.dentries) > 0
 
 ansi_red = "\x1b[31m"
 ansi_rst = "\x1b[m"
@@ -597,7 +580,7 @@ class JemfShell(CommandInterpreter):
 		l = []
 		for name in pdir.dentries:
 			if name.startswith(pfx):
-				suffix = os.sep if isdir(pdir.dentries[name]) else " "
+				suffix = os.sep if isinstance(pdir.dentries[name], Directory) else " "
 				l.append(base + name + suffix)
 
 		return l
@@ -847,19 +830,16 @@ class Jemf(object):
 		fsdir: FSObj = root
 		trail = os.sep
 		for c in comps:
-			if not isdir(fsdir):
+			if not isinstance(fsdir, Directory):
 				raise NotADirectory("'%s' is not a directory" % trail)
-			assert isinstance(fsdir, Directory) # mypy
 			prevdir = fsdir
 			try:
 				fsdir = fsdir[c]
 			except KeyError:
 				raise FileNotFound("'%s' does not exist in '%s'" % (c, trail))
 			# TODO: ELOOP detection?
-			while islink(fsdir):
-				# mypy
-				assert isinstance(fsdir, Symlink)
-				assert fsdir.target is not None
+			while isinstance(fsdir, Symlink):
+				assert fsdir.target is not None # mypy
 
 				tmp = self.lookup_path(fsdir.target, override_cwd=prevdir)
 				prevdir = fsdir
@@ -892,7 +872,7 @@ class Jemf(object):
 			parent = root
 			tgtcomp = os.path.curdir
 
-		if not isdir(parent):
+		if not isinstance(parent, Directory):
 			error("'%s' is not a directory" % os.path.join(*comps))
 
 		if should_exist is not None:
@@ -981,12 +961,10 @@ class Jemf(object):
 		"""create a new file"""
 		parent, newname, existing = self.lookup_for_edit(args.path, should_exist=None)
 		if existing is not None:
-			if not islink(existing):
+			if not isinstance(existing, Symlink):
 				error("'%s' already exists" % args.path)
 
-			# mypy
-			assert isinstance(existing, Symlink)
-			assert existing.target is not None
+			assert existing.target is not None # mypy
 
 			# create on an existing broken symlink should
 			# try to create the file the link points to
@@ -1008,11 +986,8 @@ class Jemf(object):
 		"""edit an existing file"""
 		editfile = self.lookup_path(args.path)
 
-		if not isfile(editfile):
+		if not isinstance(editfile, File):
 			error("'%s' is not a file" % args.path)
-
-		# mypy
-		assert isinstance(editfile, File)
 
 		if args.generate is None:
 			newdata = confirmed_getpass("new data for %s" % args.path)
@@ -1039,16 +1014,14 @@ class Jemf(object):
 		# symlink to file or a broken symlink however, just
 		# replace the link itself with frompath.)
 
-		if victim is not None and islink(victim):
-			assert isinstance(victim, Symlink) # mypy
+		if victim is not None and isinstance(victim, Symlink):
 			assert victim.target is not None # mypy
 			try:
 				victim = self.lookup_path(victim.target, override_cwd=newparent)
 			except PathLookupError:
 				victim = None
 
-		if victim is not None and isdir(victim):
-			assert isinstance(victim, Directory) # mypy
+		if victim is not None and isinstance(victim, Directory):
 			newparent = victim
 			newobjname = objname
 			topath = os.path.join(args.topath, objname)
@@ -1076,16 +1049,14 @@ class Jemf(object):
 	def ln(self, args: Args) -> None:
 		"""create a symlink"""
 		parent, newname, obj = self.lookup_for_edit(args.linkpath, should_exist=None)
-		if obj is not None and islink(obj):
-			assert isinstance(obj, Symlink) # mypy
+		if obj is not None and isinstance(obj, Symlink):
 			assert obj.target is not None # mypy
 			obj = self.lookup_path(obj.target, override_cwd=parent)
 
 		if obj is not None:
 			# if linkpath is a directory (or a symlink to one),
 			# create the symlink linkpath/basename(target) instead
-			if isdir(obj):
-				assert isinstance(obj, Directory) # mypy
+			if isinstance(obj, Directory):
 				parent = obj
 				newname = path_components(args.target)[-1]
 			else:
@@ -1122,7 +1093,7 @@ class Jemf(object):
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
 
-		if isdir(item):
+		if isinstance(item, Directory):
 			error("'%s' is a directory" % args.path)
 
 		assert isinstance(item, File) # mypy,  because lookup_path() resolves symlinks
@@ -1164,14 +1135,13 @@ class Jemf(object):
 			def fmtitem(item: Tuple[str, FSObj]) -> str:
 				name, obj = item
 				main = name
-				if isdir(obj):
+				if isinstance(obj, Directory):
 					main += os.path.sep
 
 				if args.long:
 					pfx = time.strftime(timefmt, time.localtime(obj.mtime))
 					pfx += " %s  %*s  " % (obj.mtzname, hostlen, obj.mhost)
-					if islink(obj):
-						assert isinstance(obj, Symlink) # mypy
+					if isinstance(obj, Symlink):
 						main += " -> %s" % obj.target
 				else:
 					pfx = ""
@@ -1179,7 +1149,7 @@ class Jemf(object):
 				return pfx + main
 			return '\n'.join(fmtitem(i) for i in objs if not isdot(i[0]) or args.all) + '\n'
 
-		if isfile(obj) or args.directory:
+		if isinstance(obj, File) or args.directory:
 			objs = [(path, obj)]
 		else:
 			assert isinstance(obj, Directory) # mypy, because lookup_path() resolves symlinks
@@ -1239,8 +1209,7 @@ class Jemf(object):
 			print("(Nothing selected.)", file=sys.stderr)
 			exit(1)
 		item = self.lookup_path(selected)
-		assert isfile(item)
-		assert isinstance(item, File) # mypy
+		assert isinstance(item, File)
 		assert item.data is not None # mypy
 		self.output_secret(item.data, args.force)
 
