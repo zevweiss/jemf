@@ -607,6 +607,8 @@ class JemfShell(CommandInterpreter):
 			try:
 				cmd(self.fs, args)
 			except UserError as ue:
+				if self.args.exit_on_failure:
+					raise
 				if ue.args[0]:
 					errprint(ue.args[0])
 		cmdfun.__doc__ = cmd.parser.format_help()
@@ -1207,7 +1209,10 @@ class Jemf(object):
 
 	@reader([(("-p", "--pipe-to"), dict(metavar="CMD", type=str, default=None,
 					    help="shell command to pipe output to for commands"
-					    " that print file data"))], batch_only=True)
+					    " that print file data")),
+		 (("-e", "--exit-on-failure"), dict(help="exit on command failure",
+						    action="store_true"))],
+		batch_only=True)
 	def shell(self, args: Args) -> None:
 		"""start an interactive jemf shell"""
 		sh = JemfShell(self, args)
