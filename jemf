@@ -639,17 +639,28 @@ def mk_path_arg(desc: str, opt: bool=False, multiple_ok: bool=False) -> Tuple[Tu
 		d["nargs"] = '?'
 	return (("path%s" % ("s" if multiple_ok else ""),), d)
 
-_jemf_commands = []
-
-JemfCommand = Callable[['Jemf', Args], None]
+JemfCommandFn = Callable[['Jemf', Args], None]
 JemfCommandArgs = List[Tuple[Union[Tuple[str], Tuple[str, str]], Dict[str, Any]]]
-JemfCommandDecorator = Callable[[JemfCommand], JemfCommand]
+JemfCommandDecorator = Callable[[JemfCommandFn], 'JemfCommand']
 
-# inner decorator for methods implementing commands
-def _jemf_command(fn: JemfCommand, **kwargs: Any) -> JemfCommand:
-	method = lambda f: types.MethodType(f, fn)
+class JemfCommand(object):
+	_all_commands: List['JemfCommand'] = []
 
-	@method
+	def __init__(self, cmdfn: JemfCommandFn, cmd_args: Optional[JemfCommandArgs]=None,
+		     parser_kwargs: Optional[Dict[str, Any]]=None,
+		     shell_only: bool=False, batch_only: bool=False) -> None:
+		self.name = cmdfn.__name__
+		self.desc = cmdfn.__doc__
+		self.cmdfn = cmdfn
+		self.cmd_args = cmd_args if cmd_args is not None else []
+		self.parser_kwargs = parser_kwargs if parser_kwargs is not None else {}
+		self.shell_only = shell_only
+		self.batch_only = batch_only
+		JemfCommand._all_commands.append(self)
+
+	def __call__(self, origself: 'Jemf', args: Args) -> None:
+		return self.cmdfn(origself, args)
+
 	def add_to(self, subparsers) -> None:
 		self.parser = subparsers.add_parser(self.name, description=self.desc,
 						    help=self.desc, add_help=False, **self.parser_kwargs)
@@ -663,53 +674,34 @@ def _jemf_command(fn: JemfCommand, **kwargs: Any) -> JemfCommand:
 		self.parser.add_argument('-h', "--help", action=JemfHelpAction, default=argparse.SUPPRESS,
 					 nargs=0, help="show this help message")
 
-	@method
 	def create_parser(self) -> None:
 		tmp = argparse.ArgumentParser().add_subparsers()
 		self.add_to(tmp)
 
-	# supply default command attributes
-	attrs = dict(cmd_args = [],
-		     parser_kwargs = {},
-		     batch_only = False,
-		     shell_only = False,
-		     name = fn.__name__,
-		     desc = fn.__doc__,
-		     add_to = add_to,
-		     create_parser = create_parser)
+	# decorator for commands that modify the FS
+	@staticmethod
+	def writer(cmd_args: JemfCommandArgs, **kwargs: Any) -> JemfCommandDecorator:
+		def wr_dec(fn: JemfCommandFn) -> JemfCommand:
+			@functools.wraps(fn)
+			def new_fn(self, *args, **kwargs): # FIXME: type annotations
+				fn(self, *args, **kwargs)
+				self._write_out()
+			return JemfCommand(new_fn, cmd_args=cmd_args, **kwargs)
+		return wr_dec
 
-	# defaults overridable via @reader()/@writer kwargs
-	attrs.update(kwargs)
-
-	for a, v in attrs.items():
-		setattr(fn, a, v)
-
-	_jemf_commands.append(fn)
-
-	return fn
-
-# decorator for commands that modify the FS
-def _jemf_write_command(cmd_args: JemfCommandArgs, **kwargs: Any) -> JemfCommandDecorator:
-	def wr_dec(fn: JemfCommand) -> JemfCommand:
-		@functools.wraps(fn)
-		def new_fn(self, *args, **kwargs): # FIXME: type annotations
-			fn(self, *args, **kwargs)
-			self._write_out()
-		return _jemf_command(new_fn, cmd_args=cmd_args, **kwargs)
-	return wr_dec
-
-# decorator for read-only commands
-def _jemf_read_command(cmd_args: JemfCommandArgs, **kwargs: Any) -> JemfCommandDecorator:
-	def rd_dec(fn: JemfCommand) -> JemfCommand:
-		return _jemf_command(fn, cmd_args=cmd_args, **kwargs)
-	return rd_dec
+	# decorator for read-only commands
+	@staticmethod
+	def reader(cmd_args: JemfCommandArgs, **kwargs: Any) -> JemfCommandDecorator:
+		def rd_dec(fn: JemfCommandFn) -> JemfCommand:
+			return JemfCommand(fn, cmd_args=cmd_args, **kwargs)
+		return rd_dec
 
 SOCKBUF_SIZE = 1024
 
 class Jemf(object):
-	reader = _jemf_read_command
-	writer = _jemf_write_command
-	commands = _jemf_commands
+	reader = JemfCommand.reader
+	writer = JemfCommand.writer
+	commands = JemfCommand._all_commands
 
 	def __init__(self, filename: str, password: Optional[str]) -> None:
 		self.filename = filename
@@ -1216,7 +1208,7 @@ class Jemf(object):
 	@reader([(("-p", "--pipe-to"), dict(metavar="CMD", type=str, default=None,
 					    help="shell command to pipe output to for commands"
 					    " that print file data"))], batch_only=True)
-	def shell(self, args): # FIXME: type annotations
+	def shell(self, args: Args) -> None:
 		"""start an interactive jemf shell"""
 		sh = JemfShell(self, args)
 
@@ -1540,7 +1532,7 @@ def serve_fs(fs: Jemf, timeout: int) -> None:
 				pass
 			exit(1)
 
-def main(): # FIXME: type annotations
+def main() -> None:
 	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem",
 					     epilog="FS file can also be specified with the environment"
 					     " variable JEMF_FSFILE")
@@ -1553,7 +1545,7 @@ def main(): # FIXME: type annotations
 				"passphrase-less operation of subsequent invocations within NSEC seconds",
 				metavar="NSEC", default=0)
 
-	subparsers = mainparser.add_subparsers(metavar="COMMAND", title=None)
+	subparsers = mainparser.add_subparsers(metavar="COMMAND", title=None) # type: ignore[arg-type]
 	subparsers.required = True
 
 	# sorted for ordering in --help output
