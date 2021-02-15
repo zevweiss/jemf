@@ -10,7 +10,7 @@
 
 import sys
 import argparse
-from getpass import getuser as get_username, getpass as getpass_tty
+from getpass import getuser as lib_getuser, getpass as lib_getpass
 import subprocess
 import json
 import os
@@ -32,6 +32,10 @@ import atexit
 import re
 import struct
 
+from typing import NoReturn, Any, Optional, List, Dict, Tuple, Callable, Union
+from typing import Text, Sequence, ItemsView
+from types import FrameType
+
 try:
 	import readline
 	import string
@@ -47,7 +51,7 @@ debugmode = os.getenv("JEMF_DEBUG") is not None
 CURRENT_FORMAT_VERSION = 3
 
 # python3's os.pipe() sets O_CLOEXEC, which we don't want
-def pipe():
+def pipe() -> Tuple[int, int]:
 	return os.pipe2(0)
 
 class UserError(Exception):
@@ -68,14 +72,14 @@ class CorruptFS(Exception):
 class FormatVersionMismatch(Exception):
 	pass
 
-def errprint_tty(msg):
+def errprint_tty(msg: str) -> None:
 	if msg != '' and msg[-1] != '\n':
 		msg += '\n'
 	print(msg, end='', file=sys.stderr)
 
 zenity_args = ["zenity", "--title", "jemf"]
 
-def errprint_gui(msg):
+def errprint_gui(msg: str) -> None:
 	errprogs = [zenity_args + ["--error", "--text"], ["gxmessage"], ["xmessage"]]
 	for ep in errprogs:
 		try:
@@ -86,13 +90,13 @@ def errprint_gui(msg):
 	print("(None of %s succeeded)" % [ep[0] for ep in errprogs], file=sys.stderr)
 	errprint_tty(msg)
 
-def error(msg):
+def error(msg: str) -> NoReturn:
 	raise UserError("Error: %s" % msg)
 
-def internal_error(msg):
+def internal_error(msg: str) -> NoReturn:
 	raise InternalError("Internal error: %s" % msg)
 
-def getpass_gui(prompt):
+def getpass_gui(prompt: str) -> str:
 	progs = [["ssh-askpass"], ["gnome-ssh-askpass"],
 		 zenity_args + ["--entry", "--hide-text", "--text"]]
 	for p in progs:
@@ -107,10 +111,13 @@ def getpass_gui(prompt):
 
 	error("None of %s succeeded" % [p[0] for p in progs])
 
+def getpass_tty(prompt: str) -> str:
+	return lib_getpass(prompt)
+
 getpass_interactive = getpass_tty
 errprint = errprint_tty
 
-def confirm_gui(prompt):
+def confirm_gui(prompt: str) -> bool:
 	xmsg_flags = ["-buttons", "No:1,Yes:0", "-default", "Yes"]
 	progs = [zenity_args + ["--question", "--text"],
 		 ["gxmessage"] + xmsg_flags,
@@ -123,12 +130,14 @@ def confirm_gui(prompt):
 			pass
 	error("None of %s succeeded" % [p[0] for p in progs])
 
-def getpass(prompt):
+def getpass(prompt: str) -> str:
 	if os.getenv("__JEMF_TEST__") == '1':
-		return os.getenv("__JEMF_TEST_PASSWORD__")
+		tmp = os.getenv("__JEMF_TEST_PASSWORD__")
+		assert tmp is not None
+		return tmp
 	return getpass_interactive(prompt)
 
-def confirmed_getpass(label):
+def confirmed_getpass(label: str) -> str:
 	pass1 = getpass("Enter %s: " % label)
 	pass2 = getpass("Confirm %s: " % label)
 	if pass1 != pass2:
@@ -136,30 +145,30 @@ def confirmed_getpass(label):
 	else:
 		return pass1
 
-def find_fs():
+def find_fs() -> Optional[str]:
 	for p in default_fspaths:
 		if os.path.exists(p):
 			return p
 	return None
 
 class JemfJSONEncoder(json.JSONEncoder):
-	def default(self, obj):
+	def default(self, obj: Any) -> Any:
 		if isinstance(obj, FSObj):
 			return obj.to_json_obj()
 		else:
 			return json.JSONEncoder.default(self, obj)
 
-def pretty_json_dump(d):
+def pretty_json_dump(d: Any) -> str:
 	return json.dumps(d, sort_keys=True, indent=4, separators=(',', ': '), cls=JemfJSONEncoder)
 
-def check_tty_print_interlock(force):
+def check_tty_print_interlock(force: bool) -> None:
 	if not force and sys.stdout.isatty():
 		error("won't print to terminal without '-f'")
 
-def run_gpg(args, passwd, stdin_data=None):
-	pw_r, pw_w = pipe()
-	pw_w = os.fdopen(pw_w, "w")
-	cmdargs = [gpgcmd, "--quiet", "--batch", "--passphrase-fd", str(pw_r)] + args
+def run_gpg(args: List[str], passwd: str, stdin_data: Optional[bytes]=None) -> bytes:
+	pw_rfd, pw_wfd = pipe()
+	pw_w = os.fdopen(pw_wfd, "w")
+	cmdargs = [gpgcmd, "--quiet", "--batch", "--passphrase-fd", str(pw_rfd)] + args
 
 	try:
 		# close write end of passphrase pipe in child process
@@ -174,7 +183,7 @@ def run_gpg(args, passwd, stdin_data=None):
 			raise
 
 	# parent doesn't use read end
-	os.close(pw_r)
+	os.close(pw_rfd)
 
 	# send passphrase to gpg child
 	pw_w.write(passwd)
@@ -195,13 +204,13 @@ def run_gpg(args, passwd, stdin_data=None):
 
 	return stdout_data
 
-def gpg_decrypt(path, password):
+def gpg_decrypt(path: str, password: str) -> bytes:
 	return run_gpg(["-d", "--no-mdc-warning", path], password)
 
-def gpg_encrypt(path, password, data):
+def gpg_encrypt(path: str, password: str, data: bytes) -> bytes:
 	return run_gpg(["-c", "--yes", "-o", path], password, data)
 
-def update_fsfile(path, password, plaintext):
+def update_fsfile(path: str, password: str, plaintext: bytes) -> None:
 	# If filename is a symlink, do the new file write & rename in
 	# the directory in which the pointed-to file resides
 	filename = os.path.realpath(path)
@@ -225,7 +234,7 @@ def update_fsfile(path, password, plaintext):
 	os.close(dirfd)
 
 hostname = None
-def get_hostname():
+def get_hostname() -> str:
 	global hostname
 	if hostname is None:
 		hostname = socket.gethostbyaddr(socket.gethostname())[0]
@@ -234,7 +243,7 @@ def get_hostname():
 multi_slash_pat = re.compile('//+')
 trailing_slash_pat = re.compile('/+$')
 
-def path_components(path):
+def path_components(path: str) -> List[str]:
 	# collapse redundant slashes and remove trailing slashes
 	np = re.sub(multi_slash_pat, '/', path)
 	np = re.sub(trailing_slash_pat, '', np)
@@ -272,7 +281,7 @@ char_classes = {
 	'P': "!@#$%^&*:._-=+", # punctuation
 }
 
-def constraints_to_dict(cstr):
+def constraints_to_dict(cstr: str) -> Dict[str, int]:
 	d = {}
 	for c in cstr.split(":"):
 		if c != "":
@@ -281,7 +290,7 @@ def constraints_to_dict(cstr):
 			d[c[0]] = int(c[1:])
 	return d
 
-def generate_data(constraints, punctuation_chars=None):
+def generate_data(constraints: str, punctuation_chars: Optional[str]=None) -> str:
 	classes = char_classes.copy()
 	if punctuation_chars is not None:
 		classes['P'] = punctuation_chars
@@ -303,21 +312,22 @@ def generate_data(constraints, punctuation_chars=None):
 	random.shuffle(l)
 	return ''.join(l[:cdict['L']])
 
-def isdot(p):
+def isdot(p: str) -> bool:
 	return p.startswith('.') and p not in [".", ".."]
 
-def recursive_list(obj, pfx, fileonly=False, skip_dots=True):
+def recursive_list(obj: 'FSObj', pfx: str, fileonly: bool=False, skip_dots: bool=True) -> List[str]:
 	l = []
 	skip = skip_dots and isdot(os.path.basename(pfx))
 	if (not fileonly or isfile(obj)) and not skip:
 		l.append(pfx)
 	if isdir(obj) and not skip:
+		assert isinstance(obj, Directory) # mypy
 		for n, o in obj.items():
 			l += recursive_list(o, os.path.join(pfx, n), fileonly=fileonly,
 					    skip_dots=skip_dots)
 	return l
 
-def extract(jd, key, expected):
+def extract(jd: Dict[str, Any], key: str, expected: type) -> Any:
 	if key not in jd:
 		raise CorruptFS("missing %s" % key)
 	tmp = jd.pop(key)
@@ -326,35 +336,38 @@ def extract(jd, key, expected):
 	return tmp
 
 class FSObj(object):
-	def __init__(self, init_metadata=True):
-		self.mtime = None
-		self.mtzname = None
-		self.mhost = None
+	# to be overridden with something meaningful by derived bclasses
+	type_id: Optional[str] = None
+
+	def __init__(self, init_metadata: bool=True) -> None:
+		self.mtime: Optional[float] = None
+		self.mtzname: Optional[str] = None
+		self.mhost: Optional[str] = None
 		if init_metadata:
 			self.touch()
 
-	def touch(self):
+	def touch(self) -> None:
 		self.mtime = time.time()
 		self.mtzname = time.tzname[time.daylight]
 		self.mhost = get_hostname()
 
-	def _fill_from_json_obj(self, jd):
+	def _fill_from_json_obj(self, jd: Dict[str, Any]) -> None:
 		self.mtime = extract(jd, "mtime", float)
 		self.mtzname = extract(jd, "mtzname", str)
 		self.mhost = extract(jd, "mhost", str)
 
-	def to_json_obj(self):
+	def to_json_obj(self) -> Dict[str, Any]:
 		return dict(mtime=self.mtime, mtzname=self.mtzname, mhost=self.mhost,
 			    type=self.type_id)
 
 class File(FSObj):
 	type_id = 'f'
 
-	def __init__(self, data, init_metadata=True):
+	def __init__(self, data: Optional[str], init_metadata: bool=True) -> None:
 		super().__init__(init_metadata)
 		self.data = data
 
-	def _fill_from_json_obj(self, jd):
+	def _fill_from_json_obj(self, jd: Dict[str, Any]) -> None:
 		super()._fill_from_json_obj(jd)
 		self.data = extract(jd, "data", str)
 		if len(jd) > 0:
@@ -362,7 +375,7 @@ class File(FSObj):
 					% ", ".join(jd.keys()))
 
 	@classmethod
-	def from_json_obj(cls, jd):
+	def from_json_obj(cls, jd: Dict[str, Any]): # FIXME: return type
 		if not isinstance(jd, dict):
 			raise CorruptFS("invalid file object (%s)" % type(jd).__name__)
 
@@ -370,7 +383,7 @@ class File(FSObj):
 		f._fill_from_json_obj(jd)
 		return f
 
-	def to_json_obj(self):
+	def to_json_obj(self) -> Dict[str, Any]:
 		d = super().to_json_obj()
 		d["data"] = self.data
 		return d
@@ -378,16 +391,16 @@ class File(FSObj):
 class Directory(FSObj):
 	type_id = 'd'
 
-	def __init__(self, parent, init_metadata=True):
+	def __init__(self, parent: Optional['Directory'], init_metadata: bool=True) -> None:
 		super().__init__(init_metadata)
 		if parent is None:
 			parent = self
 		else:
 			assert type(parent) is Directory
 		self._specials = {os.path.curdir: self, os.path.pardir: parent}
-		self.dentries = {}
+		self.dentries: Dict[str, FSObj] = {}
 
-	def _fill_from_json_obj(self, jd):
+	def _fill_from_json_obj(self, jd: Dict[str, Any]) -> None:
 		for name, item in extract(jd, "entries", dict).items():
 			t = extract(item, "type", str)
 			if t == 'f':
@@ -409,7 +422,7 @@ class Directory(FSObj):
 					% ", ".join(jd.keys()))
 
 	@classmethod
-	def from_json_obj(cls, jd, parent=None):
+	def from_json_obj(cls, jd: Dict[str, Any], parent: Optional['Directory']=None): # FIXME: return type
 		if not isinstance(jd, dict):
 			raise CorruptFS("invalid directory object (%s)" % type(jd).__name__)
 
@@ -417,41 +430,41 @@ class Directory(FSObj):
 		d._fill_from_json_obj(jd)
 		return d
 
-	def to_json_obj(self):
+	def to_json_obj(self) -> Dict[str, Any]:
 		d = super().to_json_obj()
 		d["entries"] = self.dentries
 		return d
 
-	def __getitem__(self, k):
+	def __getitem__(self, k: str) -> FSObj:
 		if k in self._specials:
 			return self._specials[k]
 		else:
 			return self.dentries.__getitem__(k)
 
-	def __contains__(self, k):
+	def __contains__(self, k: str) -> bool:
 		return k in self._specials or self.dentries.__contains__(k)
 
-	def __setitem__(self, k, v):
+	def __setitem__(self, k: str, v: FSObj) -> None:
 		assert k not in self._specials
 		self.touch()
 		self.dentries.__setitem__(k, v)
 
-	def __delitem__(self, k):
+	def __delitem__(self, k: str) -> None:
 		assert k not in self._specials
 		self.touch()
 		self.dentries.__delitem__(k)
 
-	def items(self):
+	def items(self) -> ItemsView[str, FSObj]:
 		return self.dentries.items()
 
 class Symlink(FSObj):
 	type_id = 'l'
 
-	def __init__(self, target, init_metadata=True):
+	def __init__(self, target: Optional[str], init_metadata: bool=True) -> None:
 		super().__init__(init_metadata)
 		self.target = target
 
-	def _fill_from_json_obj(self, jd):
+	def _fill_from_json_obj(self, jd: Dict[str, Any]) -> None:
 		super()._fill_from_json_obj(jd)
 		self.target = extract(jd, "target", str)
 		if len(jd) > 0:
@@ -459,7 +472,7 @@ class Symlink(FSObj):
 					% ", ".join(jd.keys()))
 
 	@classmethod
-	def from_json_obj(cls, jd):
+	def from_json_obj(cls, jd: Dict[str, Any]): # FIXME: return type
 		if not isinstance(jd, dict):
 			raise CorruptFS("invalid symlink object (%s)" % type(jd).__name__)
 
@@ -467,30 +480,34 @@ class Symlink(FSObj):
 		l._fill_from_json_obj(jd)
 		return l
 
-	def to_json_obj(self):
+	def to_json_obj(self) -> Dict[str, Any]:
 		d = super().to_json_obj()
 		d["target"] = self.target
 		return d
 
-def isdir(obj):
+def isdir(obj: FSObj) -> bool:
 	assert isinstance(obj, FSObj)
 	return isinstance(obj, Directory)
 
-def isfile(obj):
+def isfile(obj: FSObj) -> bool:
 	assert isinstance(obj, FSObj)
 	return isinstance(obj, File)
 
-def islink(obj):
+def islink(obj: FSObj) -> bool:
 	assert isinstance(obj, FSObj)
 	return isinstance(obj, Symlink)
 
-def is_nonempty_dir(obj):
-	return isdir(obj) and len(obj.dentries) > 0
+def is_nonempty_dir(obj: FSObj) -> bool:
+	if isdir(obj):
+		assert isinstance(obj, Directory) # mypy
+		return len(obj.dentries) > 0
+	else:
+		return False
 
 ansi_red = "\x1b[31m"
 ansi_rst = "\x1b[m"
 
-def clear_terminal():
+def clear_terminal() -> None:
 	curses.setupterm()
 	e3 = curses.tigetstr("E3")
 	if e3:
@@ -498,13 +515,15 @@ def clear_terminal():
 	curses.putp(curses.tigetstr("clear"))
 	sys.stdout.flush()
 
+Args = argparse.Namespace
+
 class JemfShell(CommandInterpreter):
 
 	# Time out after 3 minutes waiting for input (can be
 	# overridden via JEMF_TMOUT environment variable)
 	input_timeout = 180
 
-	def __init__(self, jemf, args):
+	def __init__(self, jemf: 'Jemf', args: Args):
 		self.fs = jemf
 		self.args = args
 		self.prompt = ("%sjemf[%s]> %s" % (ansi_red, self.fs.filename, ansi_rst)) if sys.stdin.isatty() else ""
@@ -517,39 +536,40 @@ class JemfShell(CommandInterpreter):
 					 % self.input_timeout)
 		CommandInterpreter.__init__(self)
 
-	def do_EOF(self, args):
+	def do_EOF(self, args: List[str]) -> bool:
 		"""EOF (^D): exit shell session."""
 		if sys.stdin.isatty():
 			sys.stdout.write('\n')
 		return True
 
-	def set_input_timeout_alarm(self):
+	def set_input_timeout_alarm(self) -> None:
 		if self.input_timeout <= 0:
 			return
-		def alrm_handler(signum, frame):
+		def alrm_handler(signum: int, frame: FrameType) -> None:
 			clear_terminal()
 			errprint("Input timeout exceeded; exiting.\n")
 			sys.exit(1)
 		signal.signal(signal.SIGALRM, alrm_handler)
 		signal.alarm(self.input_timeout)
 
-	def preloop(self):
+	def preloop(self) -> None:
 		self.set_input_timeout_alarm()
 
-	def postcmd(self, stop, line):
+	def postcmd(self, stop: bool, line: str) -> bool:
 		if not stop:
 			self.set_input_timeout_alarm()
 		return stop
 
 	# This is defined to override default "repeat previous
 	# command" behavior on getting an empty line.
-	def emptyline(self):
-		return
+	def emptyline(self) -> bool:
+		return False
 
-	def default(self, line):
+	def default(self, line: str) -> bool:
 		errprint("Unrecognized command: %s\n(see 'help')" % line.split()[0])
+		return False
 
-	def completedefault(self, orig_text, line, beg, end):
+	def completedefault(self, orig_text, line, beg, end): # FIXME: type annotations
 		try:
 			if shlex.split(line[:end] + ".")[-1] != ".":
 				text = shlex.split(line[:end])[-1]
@@ -573,8 +593,8 @@ class JemfShell(CommandInterpreter):
 		return l
 
 	@classmethod
-	def _add_cmd_handler(cls, cmd):
-		def cmdfun(self, argstr):
+	def _add_cmd_handler(cls, cmd): # FIXME: type annotations
+		def cmdfun(self: 'JemfShell', argstr: str) -> None:
 			try:
 				args = cmd.parser.parse_args(shlex.split(argstr))
 			except (ValueError, UsageError) as exc:
@@ -605,17 +625,18 @@ class HelpFlagPassed(Exception):
 # Custom help action that doesn't unconditionally exit (which we don't want in
 # shell mode).
 class JemfHelpAction(argparse.Action):
-	def __call__(self, parser, namespace, values, option_string=None):
+	def __call__(self, parser: argparse.ArgumentParser, namespace: Args,
+		     values: Union[Text, Sequence[Any], None], option_string: Optional[str]=None) -> NoReturn:
 		parser.print_help()
 		raise HelpFlagPassed()
 
-def mk_raise_usage_error(usage):
+def mk_raise_usage_error(usage: str) -> Callable[[str], NoReturn]:
 	usg = usage.strip()
-	def func(msg):
+	def func(msg: str) -> NoReturn:
 		raise UsageError("%s\n%s" % (usg, msg.strip()))
 	return func
 
-def mk_path_arg(desc, opt=False, multiple_ok=False):
+def mk_path_arg(desc: str, opt: bool=False, multiple_ok: bool=False) -> Tuple[Tuple[str], Dict[str, str]]:
 	d = dict(metavar="PATH", help=desc)
 	if opt and multiple_ok:
 		d["nargs"] = '*'
@@ -627,12 +648,16 @@ def mk_path_arg(desc, opt=False, multiple_ok=False):
 
 _jemf_commands = []
 
+JemfCommand = Callable[['Jemf', Args], None]
+JemfCommandArgs = List[Tuple[Union[Tuple[str], Tuple[str, str]], Dict[str, Any]]]
+JemfCommandDecorator = Callable[[JemfCommand], JemfCommand]
+
 # inner decorator for methods implementing commands
-def _jemf_command(fn, **kwargs):
+def _jemf_command(fn: JemfCommand, **kwargs: Any) -> JemfCommand:
 	method = lambda f: types.MethodType(f, fn)
 
 	@method
-	def add_to(self, subparsers):
+	def add_to(self, subparsers) -> None:
 		self.parser = subparsers.add_parser(self.name, description=self.desc,
 						    help=self.desc, add_help=False, **self.parser_kwargs)
 		self.parser.set_defaults(action=self)
@@ -646,7 +671,7 @@ def _jemf_command(fn, **kwargs):
 					 nargs=0, help="show this help message")
 
 	@method
-	def create_parser(self):
+	def create_parser(self) -> None:
 		tmp = argparse.ArgumentParser().add_subparsers()
 		self.add_to(tmp)
 
@@ -671,18 +696,18 @@ def _jemf_command(fn, **kwargs):
 	return fn
 
 # decorator for commands that modify the FS
-def _jemf_write_command(cmd_args, **kwargs):
-	def wr_dec(fn):
+def _jemf_write_command(cmd_args: JemfCommandArgs, **kwargs: Any) -> JemfCommandDecorator:
+	def wr_dec(fn: JemfCommand) -> JemfCommand:
 		@functools.wraps(fn)
-		def new_fn(self, *args, **kwargs):
+		def new_fn(self, *args, **kwargs): # FIXME: type annotations
 			fn(self, *args, **kwargs)
 			self._write_out()
 		return _jemf_command(new_fn, cmd_args=cmd_args, **kwargs)
 	return wr_dec
 
 # decorator for read-only commands
-def _jemf_read_command(cmd_args, **kwargs):
-	def rd_dec(fn):
+def _jemf_read_command(cmd_args: JemfCommandArgs, **kwargs: Any) -> JemfCommandDecorator:
+	def rd_dec(fn: JemfCommand) -> JemfCommand:
 		return _jemf_command(fn, cmd_args=cmd_args, **kwargs)
 	return rd_dec
 
@@ -693,23 +718,23 @@ class Jemf(object):
 	writer = _jemf_write_command
 	commands = _jemf_commands
 
-	def __init__(self, filename, password):
+	def __init__(self, filename: str, password: Optional[str]) -> None:
 		self.filename = filename
 		self.password = password
-		self.pipe_to = None
+		self.pipe_to: Optional[str] = None
 		self.data = Directory(None)
-		self.metadata = {}
+		self.metadata: Dict[str, Any] = {}
 		self.cwd = self.data
-		self.socket = None
+		self.socket: Optional[socket.socket] = None
 		self.shell_mode = False
 
-	def _to_json(self):
-		d = {}
+	def _to_json(self) -> str:
+		d: Dict[str, Any] = {}
 		d["data"] = self.data
 		d["metadata"] = self.metadata
 		return pretty_json_dump(d)
 
-	def _from_json(self, s):
+	def _from_json(self, s: str) -> None:
 		jd = json.loads(s)
 		self.metadata = extract(jd, "metadata", dict)
 
@@ -731,7 +756,7 @@ class Jemf(object):
 		self.cwd = self.data
 
 	@classmethod
-	def load_from_path(cls, filename, password):
+	def load_from_path(cls, filename: str, password: str): # FIXME: return type
 		fs = cls(filename, password)
 		s = gpg_decrypt(filename, password)
 		try:
@@ -741,8 +766,9 @@ class Jemf(object):
 		return fs
 
 	# return a (success-boolean, data) tuple
-	def recv_response(self):
+	def recv_response(self) -> Tuple[bool, Optional[str]]:
 		buf = b''
+		assert self.socket is not None
 		while len(buf) == 0 or buf[-1] != b'\n'[0]:
 			t = self.socket.recv(SOCKBUF_SIZE)
 			if len(t) == 0:
@@ -760,18 +786,19 @@ class Jemf(object):
 		return (status, data)
 
 	@classmethod
-	def from_server(cls, socket, filename):
+	def from_server(cls, socket: socket.socket, filename: str): # FIXME: return type
 		fs = cls(filename, None)
 		fs.socket = socket
 		fs.socket.sendall(b"%s %s\n" % (READ_REQ, base64.b64encode(filename.encode("utf-8"))))
 		ok, data = fs.recv_response()
 		if ok:
+			assert data is not None
 			fs._from_json(base64.b64decode(data).decode("utf-8"))
 			return fs
 		else:
 			raise ProtocolError(data)
 
-	def output_secret(self, s, force):
+	def output_secret(self, s: str, force: bool) -> None:
 		if self.pipe_to is None:
 			check_tty_print_interlock(force)
 			print(s, end='\n' if sys.stdout.isatty() else '')
@@ -785,7 +812,7 @@ class Jemf(object):
 				# might stderr be more appropriate here?
 				print("[sent output to '%s']" % self.pipe_to)
 
-	def _write_out(self):
+	def _write_out(self) -> None:
 		self.metadata["last_modification_time"] = time.time()
 		self.metadata["last_modification_tzname"] = time.tzname[time.daylight]
 		self.metadata["last_modification_host"] = get_hostname()
@@ -802,15 +829,17 @@ class Jemf(object):
 			else:
 				raise ProtocolError(data)
 		else:
+			assert self.password is not None
 			update_fsfile(self.filename, self.password, jemf_buf)
 
-
+	# FIXME: type annotations
 	def _lookup_comps(self, root, comps, noexc=False):
-		fsdir = root
+		fsdir: FSObj = root
 		trail = os.sep
 		for c in comps:
 			if not isdir(fsdir):
 				error("'%s' is not a directory" % trail)
+			assert isinstance(fsdir, Directory) # mypy
 			prevdir = fsdir
 			try:
 				fsdir = fsdir[c]
@@ -821,6 +850,10 @@ class Jemf(object):
 					error("'%s' does not exist in '%s'" % (c, trail))
 			# TODO: ELOOP detection?
 			while islink(fsdir):
+				# mypy
+				assert isinstance(fsdir, Symlink)
+				assert fsdir.target is not None
+
 				tmp = self.lookup_path(fsdir.target, noexc=noexc,
 						       override_cwd=prevdir)
 				prevdir = fsdir
@@ -828,14 +861,14 @@ class Jemf(object):
 			trail = os.path.join(trail, c)
 		return fsdir
 
-	def lookup_path(self, path, noexc=False, override_cwd=None):
+	def lookup_path(self, path: str, noexc: bool=False, override_cwd: Optional[Directory]=None) -> Optional[FSObj]:
 		if len(path) > 0 and path[0] == os.sep:
 			root = self.data
 		else:
 			root = override_cwd if override_cwd else self.cwd
 		return self._lookup_comps(root, path_components(path), noexc=noexc)
 
-	def lookup_for_edit(self, path, should_exist, override_cwd=None):
+	def lookup_for_edit(self, path: str, should_exist: Optional[bool], override_cwd: Optional[Directory]=None) -> Tuple[Directory, str, Optional[FSObj]]:
 		"""Lookup 'path', returning a 3-tuple of the parent directory, the
 		last component of 'path', and the object itself (or None
 		if it doesn't exist).
@@ -878,13 +911,13 @@ class Jemf(object):
 						       action="store_true"))
 
 	@writer([force_overwrite_arg], batch_only=True)
-	def mkfs(self, args):
+	def mkfs(self, args: Args) -> None:
 		"""initialize a new jemf FS"""
 		self.data = Directory(None)
 		self.metadata = { "format_version": CURRENT_FORMAT_VERSION }
 
 	@writer([])
-	def chpass(self, args):
+	def chpass(self, args: Args) -> None:
 		"""change the master password of a jemf FS"""
 
 		if self.password is None:
@@ -902,7 +935,7 @@ class Jemf(object):
 
 	@reader([mk_path_arg("directory to change to (default: root)", opt=True)],
 		shell_only=True)
-	def cd(self, args):
+	def cd(self, args: Args) -> None:
 		"""change working directory"""
 		if args.path is not None:
 			obj = self.lookup_path(args.path)
@@ -913,12 +946,13 @@ class Jemf(object):
 		self.cwd = obj
 
 	@reader([], shell_only=True)
-	def pwd(self, args):
+	def pwd(self, args: Args) -> None:
 		"""print working directory"""
 		# dumb brute force...could introduce some extra
 		# machinery to make this more efficient.
-		def get_dirname(obj):
+		def get_dirname(obj: Directory) -> str:
 			parent = obj[os.path.pardir]
+			assert isinstance(parent, Directory)
 			if parent is obj:
 				return os.sep
 			for k, v in parent.items():
@@ -928,7 +962,7 @@ class Jemf(object):
 		print(get_dirname(self.cwd))
 
 	@writer([mk_path_arg("the directory to create")])
-	def mkdir(self, args):
+	def mkdir(self, args: Args) -> None:
 		"""create a new directory"""
 		parent, newname, _ = self.lookup_for_edit(args.path, should_exist=False)
 		d = Directory(parent)
@@ -937,12 +971,17 @@ class Jemf(object):
 	@writer([generate_arg, punctchars_arg, mk_path_arg("the file to create")],
 		parser_kwargs=dict(epilog=gen_constraints_desc,
 				   formatter_class=argparse.RawDescriptionHelpFormatter))
-	def create(self, args):
+	def create(self, args: Args) -> None:
 		"""create a new file"""
 		parent, newname, existing = self.lookup_for_edit(args.path, should_exist=None)
 		if existing is not None:
 			if not islink(existing):
 				error("'%s' already exists" % args.path)
+
+			# mypy
+			assert isinstance(existing, Symlink)
+			assert existing.target is not None
+
 			# create on an existing broken symlink should
 			# try to create the file the link points to
 			parent, newname, _ = self.lookup_for_edit(existing.target,
@@ -959,12 +998,18 @@ class Jemf(object):
 	@writer([generate_arg, punctchars_arg, mk_path_arg("the file to edit")],
 		parser_kwargs=dict(epilog=gen_constraints_desc,
 				   formatter_class=argparse.RawDescriptionHelpFormatter))
-	def edit(self, args):
+	def edit(self, args: Args) -> None:
 		"""edit an existing file"""
 		editfile = self.lookup_path(args.path)
 
+		# mypy, because we didn't pass noexc=True to self.lookup_path()
+		assert editfile is not None
+
 		if not isfile(editfile):
 			error("'%s' is not a file" % args.path)
+
+		# mypy
+		assert isinstance(editfile, File)
 
 		if args.generate is None:
 			newdata = confirmed_getpass("new data for %s" % args.path)
@@ -977,11 +1022,14 @@ class Jemf(object):
 	@writer([force_overwrite_arg,
 		 (("frompath",), dict(metavar="FROM", help="current path/name")),
 		 (("topath",), dict(metavar="TO", help="new path/name"))])
-	def mv(self, args):
+	def mv(self, args: Args) -> None:
 		"""move/rename a file or directory"""
 		curparent, objname, obj = self.lookup_for_edit(args.frompath, should_exist=True)
 		topath = args.topath
 		newparent, newobjname, victim = self.lookup_for_edit(topath, should_exist=None)
+
+		# mypy, known because of should_exist=True when we looked it up
+		assert obj is not None
 
 		# If topath is a symlink to a directory, move frompath
 		# into the pointed-to directory.  (If topath is a
@@ -989,10 +1037,13 @@ class Jemf(object):
 		# replace the link itself with frompath.)
 
 		if victim is not None and islink(victim):
+			assert isinstance(victim, Symlink) # mypy
+			assert victim.target is not None # mypy
 			victim = self.lookup_path(victim.target,
 						  noexc=True, override_cwd=newparent)
 
 		if victim is not None and isdir(victim):
+			assert isinstance(victim, Directory) # mypy
 			newparent = victim
 			newobjname = objname
 			topath = os.path.join(args.topath, objname)
@@ -1001,7 +1052,9 @@ class Jemf(object):
 		while p[os.path.pardir] is not p:
 			if p is obj:
 				error("can't move '%s' inside itself" % args.frompath)
-			p = p[os.path.pardir]
+			tmp = p[os.path.pardir]
+			assert isinstance(tmp, Directory)
+			p = tmp
 
 		if newobjname in newparent:
 			existing = newparent[newobjname]
@@ -1015,16 +1068,19 @@ class Jemf(object):
 
 	@writer([(("target",), dict(help="link target")),
 		 (("linkpath",), dict(help="link to create"))])
-	def ln(self, args):
+	def ln(self, args: Args) -> None:
 		"""create a symlink"""
 		parent, newname, obj = self.lookup_for_edit(args.linkpath, should_exist=None)
 		if obj is not None and islink(obj):
+			assert isinstance(obj, Symlink) # mypy
+			assert obj.target is not None # mypy
 			obj = self.lookup_path(obj.target, override_cwd=parent)
 
 		if obj is not None:
 			# if linkpath is a directory (or a symlink to one),
 			# create the symlink linkpath/basename(target) instead
 			if isdir(obj):
+				assert isinstance(obj, Directory) # mypy
 				parent = obj
 				newname = path_components(args.target)[-1]
 			else:
@@ -1038,11 +1094,15 @@ class Jemf(object):
 	@writer([(("-r", "--recursive"), dict(help="recursively delete directory contents",
 					      action="store_true")),
 		 mk_path_arg("the file or directory to delete", multiple_ok=True)])
-	def rm(self, args):
+	def rm(self, args: Args) -> None:
 		"""delete a file or directory"""
 		errors = []
 		for path in args.paths:
 			parent, tgtname, obj = self.lookup_for_edit(path, should_exist=True)
+
+			# mypy, known due to should_exist=True when we looked up
+			assert obj is not None
+
 			if obj is self.data:
 				errors.append("can't delete '%s'" % os.sep)
 			elif is_nonempty_dir(obj) and not args.recursive:
@@ -1053,21 +1113,30 @@ class Jemf(object):
 			error("; ".join(errors))
 
 	@reader([mk_path_arg("the file to print"), force_print_arg])
-	def cat(self, args):
+	def cat(self, args: Args) -> None:
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
+
+		assert item is not None # mypy, because no noexc=True in lookup_path()
+
 		if isdir(item):
 			error("'%s' is a directory" % args.path)
+
+		assert isinstance(item, File) # mypy,  because lookup_path() resolves symlinks
+		assert item.data is not None # mypy
+
 		self.output_secret(item.data, args.force)
 
 	@reader([mk_path_arg("starting directory (default: .)", opt=True),
 		 (("-a", "--all"), dict(help="don't skip entries starting with '.'", action="store_true"))])
-	def find(self, args):
+	def find(self, args: Args) -> None:
 		"""recursively list files and directories"""
 		if args.path is None:
 			paths = recursive_list(self.cwd, os.path.curdir, skip_dots=not args.all)
 		else:
-			paths = recursive_list(self.lookup_path(args.path), args.path, skip_dots=not args.all)
+			tmp = self.lookup_path(args.path)
+			assert tmp is not None # mypy, no noexc=True
+			paths = recursive_list(tmp, args.path, skip_dots=not args.all)
 		sys.stdout.write('\n'.join(paths) + '\n')
 
 	@reader([mk_path_arg("file or directory to list (default: .)", opt=True),
@@ -1075,7 +1144,7 @@ class Jemf(object):
 		 (("-l", "--long"), dict(help="use long format", action="store_true")),
 		 (("-d", "--directory"), dict(help="list directories themselves, not their contents",
 					      action="store_true"))])
-	def ls(self, args):
+	def ls(self, args: Args) -> None:
 		"""list files and directories"""
 		if args.path is not None:
 			path = args.path
@@ -1084,14 +1153,14 @@ class Jemf(object):
 			path = os.path.curdir
 			obj = self.cwd
 
-		def lsfmt(objs):
+		def lsfmt(objs: Sequence[Tuple[str, FSObj]]) -> str:
 			if len(objs) == 0:
 				return ''
 			# longest mhost length
-			hostlen = max(len(o[1].mhost) for o in objs)
+			hostlen = max(len(o[1].mhost) for o in objs) # type: ignore[arg-type]
 			nometa = "????-??-?? ??:??:?? ???"
 			timefmt = "%Y-%m-%d %H:%M:%S"
-			def fmtitem(item):
+			def fmtitem(item: Tuple[str, FSObj]) -> str:
 				name, obj = item
 				main = name
 				if isdir(obj):
@@ -1101,6 +1170,7 @@ class Jemf(object):
 					pfx = time.strftime(timefmt, time.localtime(obj.mtime))
 					pfx += " %s  %*s  " % (obj.mtzname, hostlen, obj.mhost)
 					if islink(obj):
+						assert isinstance(obj, Symlink) # mypy
 						main += " -> %s" % obj.target
 				else:
 					pfx = ""
@@ -1108,7 +1178,13 @@ class Jemf(object):
 				return pfx + main
 			return '\n'.join(fmtitem(i) for i in objs if not isdot(i[0]) or args.all) + '\n'
 
-		objs = [(path, obj)] if isfile(obj) or args.directory else sorted(obj.items())
+		assert obj is not None # mypy, because no noexc=True in lookup_path() call
+
+		if isfile(obj) or args.directory:
+			objs = [(path, obj)]
+		else:
+			assert isinstance(obj, Directory) # mypy, because lookup_path() resolves symlinks
+			objs = sorted(obj.items())
 		sys.stdout.write(lsfmt(objs))
 
 	if debugmode:
@@ -1117,7 +1193,7 @@ class Jemf(object):
 			 (("-d", "--data"), dict(action="store_const", dest="kind",
 						 const="data", help="dump only data")),
 			 force_print_arg])
-		def dump(self, args):
+		def dump(self, args: Args) -> None:
 			"""dump plaintext JSON"""
 			if args.kind == "data":
 				s = pretty_json_dump(self.data)
@@ -1127,7 +1203,7 @@ class Jemf(object):
 				s = self._to_json()
 			self.output_secret(s, args.force)
 
-	def _menu_select(self, items):
+	def _menu_select(self, items: List[str]) -> Optional[str]:
 		argv = ["dmenu", "-i", "-b", "-l", "20", "-p", self.filename,
 			"-nb", "#600", "-nf", "white", "-sb", "white", "-sf", "black"]
 		try:
@@ -1139,8 +1215,8 @@ class Jemf(object):
 			else:
 				raise
 
-		out, _ = proc.communicate(b'\n'.join([i.encode("utf-8") for i in items]) + b'\n')
-		out = out.decode("utf-8")
+		outb, _ = proc.communicate(b'\n'.join([i.encode("utf-8") for i in items]) + b'\n')
+		out = outb.decode("utf-8")
 		retval = proc.wait()
 		if retval != 0 or out == '':
 			return None
@@ -1150,27 +1226,31 @@ class Jemf(object):
 
 	@reader([mk_path_arg("path to select beneath (default: .)", opt=True), force_print_arg,
 		 (("-a", "--all"), dict(help="don't skip entries starting with '.'", action="store_true"))])
-	def menu(self, args):
+	def menu(self, args: Args) -> None:
 		"""print a file selected from a menu (requires `dmenu')"""
-		if args.path is None:
-			prefix = os.path.curdir
-			top = self.cwd
-		else:
+		if args.path is not None:
 			prefix = args.path
 			top = self.lookup_path(prefix)
+			assert top is not None # mypy, because no noexc=True
+		else:
+			prefix = os.path.curdir
+			top = self.cwd
 		paths = recursive_list(top, prefix, fileonly=True, skip_dots=not args.all)
 		selected = self._menu_select(sorted(paths))
 		if selected is None:
 			print("(Nothing selected.)", file=sys.stderr)
 			exit(1)
 		item = self.lookup_path(selected)
+		assert item is not None # mypy, because no noexc=True
 		assert isfile(item)
+		assert isinstance(item, File) # mypy
+		assert item.data is not None # mypy
 		self.output_secret(item.data, args.force)
 
 	@reader([(("-p", "--pipe-to"), dict(metavar="CMD", type=str, default=None,
 					    help="shell command to pipe output to for commands"
 					    " that print file data"))], batch_only=True)
-	def shell(self, args):
+	def shell(self, args): # FIXME: type annotations
 		"""start an interactive jemf shell"""
 		sh = JemfShell(self, args)
 
@@ -1210,7 +1290,7 @@ class Jemf(object):
 
 unlock_hook = None
 
-def lock_fsfile(fspath):
+def lock_fsfile(fspath: str) -> None:
 	# canonicalize path to avoid problems if fspath is a symlink
 	# (in which case two processes could end up accessing the same
 	# fsfile using two different locks)
@@ -1222,7 +1302,7 @@ def lock_fsfile(fspath):
 	# a regular file where the creation and data-writing are
 	# separate steps (meaning another process could observe the
 	# odd in-between state)
-	lockdata = "%s@%s.%d" % (get_username(), get_hostname(), os.getpid())
+	lockdata = "%s@%s.%d" % (lib_getuser(), get_hostname(), os.getpid())
 	try:
 		os.symlink(lockdata, lockpath)
 	except OSError as e:
@@ -1262,7 +1342,7 @@ def lock_fsfile(fspath):
 	global unlock_hook
 	unlock_hook = atexit.register(lambda: os.unlink(lockpath))
 
-def open_jemf_fs(args, skip_locking=False):
+def open_jemf_fs(args: Args, skip_locking: bool=False) -> Jemf:
 	if not skip_locking:
 		lock_fsfile(args.fsfile)
 
@@ -1281,7 +1361,7 @@ def open_jemf_fs(args, skip_locking=False):
 	password = getpass("Enter password for %s: " % args.fsfile)
 	return Jemf.load_from_path(args.fsfile, password)
 
-def new_jemf_fs(args, skip_locking=False):
+def new_jemf_fs(args: Args, skip_locking: bool=False) -> Jemf:
 	if os.path.exists(args.fsfile) and not args.force:
 		error("%s exists (use -f to force reinitialization)" % args.fsfile)
 
@@ -1297,14 +1377,14 @@ def new_jemf_fs(args, skip_locking=False):
 
 	return Jemf(args.fsfile, password)
 
-def get_sockdir():
+def get_sockdir() -> str:
 	uid = os.getuid()
 	return "/tmp/.jemf-%d" % uid
 
-def get_sockpath(fsfile):
+def get_sockpath(fsfile: str) -> str:
 	return get_sockdir() + "/" + hashlib.sha1(fsfile.encode("utf-8")).hexdigest()
 
-def get_socket(fsfile):
+def get_socket(fsfile: str) -> socket.socket:
 	sockdir = get_sockdir()
 	try:
 		os.mkdir(sockdir, 0o700)
@@ -1340,10 +1420,10 @@ EXIT_REQ = b"EXIT"
 READ_REQ = b"READ"
 WRITE_REQ = b"WRITE"
 
-def err_resp(s):
+def err_resp(s: str) -> bytes:
 	return b"ERROR %s\n" % s.encode("utf-8")
 
-def serve_request(line, fs, client):
+def serve_request(line: bytes, fs: Jemf, client: socket.socket) -> None:
 	fields = line.split(b' ')
 	req = fields[0]
 	if req == EXIT_REQ:
@@ -1377,7 +1457,7 @@ def serve_request(line, fs, client):
 		resp = err_resp("invalid request")
 	client.sendall(resp)
 
-def serve_client(client, fs):
+def serve_client(client: socket.socket, fs: Jemf) -> None:
 	buf = b''
 	while True:
 		t = client.recv(SOCKBUF_SIZE)
@@ -1396,11 +1476,12 @@ def serve_client(client, fs):
 UCRED_FMT = "iII"
 
 # return a (pid, uid, gid) tuple of the local socket's peer
-def getpeercred(sock):
+def getpeercred(sock: socket.socket) -> Tuple[int, int, int]:
 	pc = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize(UCRED_FMT))
-	return struct.unpack(UCRED_FMT, pc)
+	p, u, g = struct.unpack(UCRED_FMT, pc)
+	return (p, u, g)
 
-def check_client(sock):
+def check_client(sock: socket.socket) -> bool:
 	pid, uid, gid = getpeercred(sock)
 
 	# filesystem permissions *should* prevent other users from
@@ -1417,7 +1498,7 @@ def check_client(sock):
 
 	return confirm_gui("Allow jemf access for pid %d?" % pid)
 
-def serve_fs(fs, timeout):
+def serve_fs(fs: Jemf, timeout: int) -> None:
 	srvsock = get_socket(fs.filename)
 
 	# ensure the child we're about to fork doesn't inherit a
@@ -1453,7 +1534,7 @@ def serve_fs(fs, timeout):
 
 		srvsock.listen(8)
 
-		def exit_handler(signum, frame):
+		def exit_handler(signum: int, frame: FrameType) -> None:
 			try:
 				os.unlink(get_sockpath(fs.filename))
 			except:
@@ -1493,7 +1574,7 @@ def serve_fs(fs, timeout):
 				pass
 			exit(1)
 
-def main():
+def main(): # FIXME: type annotations
 	mainparser = argparse.ArgumentParser(description="a jeneric (?), encrypted mini-filesystem",
 					     epilog="FS file can also be specified with the environment"
 					     " variable JEMF_FSFILE")
