@@ -35,11 +35,17 @@ import argparse
 
 import jemf
 
-def ensure_v2(fs):
+from typing import Tuple, List, Dict, Any
+
+# Stricter type annotations on these transforms (fewer instances of
+# 'Any') would be nice, but mypy doesn't support recursive types, so
+# doing it thoroughly isn't really feasible at the moment.
+
+def ensure_v2(fs: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
 	if fs["metadata"].get("format_version", 0) >= 2:
 		return (fs, False)
 
-	def add_metadata(item):
+	def add_metadata(item: Any) -> Any:
 		if not isinstance(item, list):
 			item = [item, dict(mhost="(unknown)", mtime=0.0, mtzname="GMT")]
 
@@ -57,11 +63,11 @@ def ensure_v2(fs):
 
 	return (fs, True)
 
-def v2_to_v3(fs):
+def v2_to_v3(fs: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
 	if fs["metadata"].get("format_version", 0) >= 3:
 		return (fs, False)
 
-	def convert_objects(item):
+	def convert_objects(item: List[Any]) -> Dict[str, Any]:
 		assert(isinstance(item, list))
 		assert(len(item) == 2)
 
@@ -96,7 +102,7 @@ version_funcs = [
 
 assert jemf.CURRENT_FORMAT_VERSION == len(version_funcs) - 1
 
-def main():
+def main() -> None:
 	parser = argparse.ArgumentParser(description="update jemf fs file format version")
 	parser.add_argument("-V", "--to-version", type=int, metavar="VERSION",
 			    help="format version to update to", default=jemf.CURRENT_FORMAT_VERSION)
