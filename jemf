@@ -627,6 +627,7 @@ class JemfHelpAction(argparse.Action):
 	def __call__(self, parser: argparse.ArgumentParser, namespace: Args,
 		     values: Union[Text, Sequence[Any], None], option_string: Optional[str]=None) -> NoReturn:
 		parser.print_help()
+		print("") # add an extra line so 'foo --help' output matches 'help foo' (cmd.do_help() adds one)
 		raise HelpFlagPassed()
 
 def mk_raise_usage_error(usage: str) -> Callable[[str], NoReturn]:
