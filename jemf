@@ -851,7 +851,7 @@ class Jemf(object):
 			tgtcomp = os.path.curdir
 
 		if not isdir(parent):
-			error("'%s' is not a directory" % os.path.join(*parentcomps))
+			error("'%s' is not a directory" % os.path.join(*comps))
 
 		if should_exist is not None:
 			if not should_exist and tgtcomp in parent:
