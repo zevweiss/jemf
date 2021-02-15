@@ -830,12 +830,9 @@ class Jemf(object):
 			except KeyError:
 				raise FileNotFound("'%s' does not exist in '%s'" % (c, trail))
 			# TODO: ELOOP detection?
-			while isinstance(fsdir, Symlink):
+			if isinstance(fsdir, Symlink):
 				assert fsdir.target is not None # mypy
-
-				tmp = self.lookup_path(fsdir.target, override_cwd=prevdir)
-				prevdir = fsdir
-				fsdir = tmp
+				fsdir = self.lookup_path(fsdir.target, override_cwd=prevdir)
 			trail = os.path.join(trail, c)
 		return fsdir
 
