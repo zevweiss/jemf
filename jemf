@@ -212,7 +212,7 @@ def update_fsfile(path, password, plaintext):
 	output = gpg_encrypt(tmppath, password, plaintext)
 	if output != b'':
 		os.unlink(tmppath)
-		internal_error("Unexpected output from gpg: %s\n" % output)
+		internal_error("Unexpected output from gpg: %r\n" % output)
 
 	os.fsync(tmpfd)
 	os.close(tmpfd)
@@ -756,7 +756,7 @@ class Jemf(object):
 		elif parts[0] == "ERROR":
 			status = False
 		else:
-			raise ProtocolError("invalid response from server: %s" % buf)
+			raise ProtocolError("invalid response from server: %r" % buf)
 		return (status, data)
 
 	@classmethod
