@@ -383,7 +383,7 @@ class File(FSObj):
 					% ", ".join(jd.keys()))
 
 	@classmethod
-	def from_json_obj(cls, jd: Dict[str, Any]): # FIXME: return type
+	def from_json_obj(cls, jd: Dict[str, Any]) -> 'File':
 		if not isinstance(jd, dict):
 			raise CorruptFS("invalid file object (%s)" % type(jd).__name__)
 
@@ -411,6 +411,7 @@ class Directory(FSObj):
 	def _fill_from_json_obj(self, jd: Dict[str, Any]) -> None:
 		for name, item in extract(jd, "entries", dict).items():
 			t = extract(item, "type", str)
+			obj: FSObj
 			if t == 'f':
 				obj = File.from_json_obj(item)
 			elif t == 'd':
@@ -430,7 +431,7 @@ class Directory(FSObj):
 					% ", ".join(jd.keys()))
 
 	@classmethod
-	def from_json_obj(cls, jd: Dict[str, Any], parent: Optional['Directory']=None): # FIXME: return type
+	def from_json_obj(cls, jd: Dict[str, Any], parent: Optional['Directory']=None) -> 'Directory':
 		if not isinstance(jd, dict):
 			raise CorruptFS("invalid directory object (%s)" % type(jd).__name__)
 
@@ -480,7 +481,7 @@ class Symlink(FSObj):
 					% ", ".join(jd.keys()))
 
 	@classmethod
-	def from_json_obj(cls, jd: Dict[str, Any]): # FIXME: return type
+	def from_json_obj(cls, jd: Dict[str, Any]) -> 'Symlink':
 		if not isinstance(jd, dict):
 			raise CorruptFS("invalid symlink object (%s)" % type(jd).__name__)
 
@@ -561,7 +562,7 @@ class JemfShell(CommandInterpreter):
 		errprint("Unrecognized command: %s\n(see 'help')" % line.split()[0])
 		return False
 
-	def completedefault(self, orig_text, line, beg, end): # FIXME: type annotations
+	def completedefault(self, orig_text: str, line: str, beg: int, end: int) -> List[str]: # type: ignore[override]
 		try:
 			if shlex.split(line[:end] + ".")[-1] != ".":
 				text = shlex.split(line[:end])[-1]
@@ -576,6 +577,9 @@ class JemfShell(CommandInterpreter):
 		except PathLookupError:
 			return []
 
+		if not isinstance(pdir, Directory):
+			return []
+
 		base = orig_text[:-len(pfx)]
 		l = []
 		for name in pdir.dentries:
@@ -586,7 +590,7 @@ class JemfShell(CommandInterpreter):
 		return l
 
 	@classmethod
-	def _add_cmd_handler(cls, cmd): # FIXME: type annotations
+	def _add_cmd_handler(cls, cmd: 'JemfCommand') -> None:
 		def cmdfun(self: 'JemfShell', argstr: str) -> None:
 			try:
 				args = cmd.parser.parse_args(shlex.split(argstr))
@@ -661,7 +665,7 @@ class JemfCommand(object):
 	def __call__(self, origself: 'Jemf', args: Args) -> None:
 		return self.cmdfn(origself, args)
 
-	def add_to(self, subparsers) -> None:
+	def add_to(self, subparsers: argparse._SubParsersAction) -> None:
 		self.parser = subparsers.add_parser(self.name, description=self.desc,
 						    help=self.desc, add_help=False, **self.parser_kwargs)
 		self.parser.set_defaults(action=self)
@@ -683,8 +687,8 @@ class JemfCommand(object):
 	def writer(cmd_args: JemfCommandArgs, **kwargs: Any) -> JemfCommandDecorator:
 		def wr_dec(fn: JemfCommandFn) -> JemfCommand:
 			@functools.wraps(fn)
-			def new_fn(self, *args, **kwargs): # FIXME: type annotations
-				fn(self, *args, **kwargs)
+			def new_fn(self: 'Jemf', args: Args) -> None:
+				fn(self, args)
 				self._write_out()
 			return JemfCommand(new_fn, cmd_args=cmd_args, **kwargs)
 		return wr_dec
@@ -741,7 +745,7 @@ class Jemf(object):
 		self.cwd = self.data
 
 	@classmethod
-	def load_from_path(cls, filename: str, password: str): # FIXME: return type
+	def load_from_path(cls, filename: str, password: str) -> 'Jemf':
 		fs = cls(filename, password)
 		s = gpg_decrypt(filename, password)
 		try:
@@ -771,7 +775,7 @@ class Jemf(object):
 		return (status, data)
 
 	@classmethod
-	def from_server(cls, socket: socket.socket, filename: str): # FIXME: return type
+	def from_server(cls, socket: socket.socket, filename: str) -> 'Jemf':
 		fs = cls(filename, None)
 		fs.socket = socket
 		fs.socket.sendall(b"%s %s\n" % (READ_REQ, base64.b64encode(filename.encode("utf-8"))))
@@ -817,8 +821,7 @@ class Jemf(object):
 			assert self.password is not None
 			update_fsfile(self.filename, self.password, jemf_buf)
 
-	# FIXME: type annotations
-	def _lookup_comps(self, root, comps):
+	def _lookup_comps(self, root: Directory, comps: List[str]) -> FSObj:
 		fsdir: FSObj = root
 		trail = os.sep
 		for c in comps:
@@ -1220,7 +1223,7 @@ class Jemf(object):
 
 			# hack around argparse's inability to report
 			# an error without exiting...
-			cmd.parser.error = mk_raise_usage_error(cmd.parser.format_usage())
+			cmd.parser.error = mk_raise_usage_error(cmd.parser.format_usage()) # type: ignore[assignment]
 
 			sh._add_cmd_handler(cmd)
 
