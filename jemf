@@ -72,6 +72,15 @@ class CorruptFS(Exception):
 class FormatVersionMismatch(Exception):
 	pass
 
+class PathLookupError(UserError):
+	pass
+
+class FileNotFound(PathLookupError):
+	pass
+
+class NotADirectory(PathLookupError):
+	pass
+
 def errprint_tty(msg: str) -> None:
 	if msg != '' and msg[-1] != '\n':
 		msg += '\n'
@@ -579,8 +588,9 @@ class JemfShell(CommandInterpreter):
 			text = orig_text
 		ppath, pfx = os.path.split(text)
 
-		pdir = self.fs.lookup_path(ppath, noexc=True)
-		if pdir is None:
+		try:
+			pdir = self.fs.lookup_path(ppath)
+		except PathLookupError:
 			return []
 
 		base = orig_text[:-len(pfx)]
@@ -833,40 +843,36 @@ class Jemf(object):
 			update_fsfile(self.filename, self.password, jemf_buf)
 
 	# FIXME: type annotations
-	def _lookup_comps(self, root, comps, noexc=False):
+	def _lookup_comps(self, root, comps):
 		fsdir: FSObj = root
 		trail = os.sep
 		for c in comps:
 			if not isdir(fsdir):
-				error("'%s' is not a directory" % trail)
+				raise NotADirectory("'%s' is not a directory" % trail)
 			assert isinstance(fsdir, Directory) # mypy
 			prevdir = fsdir
 			try:
 				fsdir = fsdir[c]
 			except KeyError:
-				if noexc:
-					return None
-				else:
-					error("'%s' does not exist in '%s'" % (c, trail))
+				raise FileNotFound("'%s' does not exist in '%s'" % (c, trail))
 			# TODO: ELOOP detection?
 			while islink(fsdir):
 				# mypy
 				assert isinstance(fsdir, Symlink)
 				assert fsdir.target is not None
 
-				tmp = self.lookup_path(fsdir.target, noexc=noexc,
-						       override_cwd=prevdir)
+				tmp = self.lookup_path(fsdir.target, override_cwd=prevdir)
 				prevdir = fsdir
 				fsdir = tmp
 			trail = os.path.join(trail, c)
 		return fsdir
 
-	def lookup_path(self, path: str, noexc: bool=False, override_cwd: Optional[Directory]=None) -> Optional[FSObj]:
+	def lookup_path(self, path: str, override_cwd: Optional[Directory]=None) -> FSObj:
 		if len(path) > 0 and path[0] == os.sep:
 			root = self.data
 		else:
 			root = override_cwd if override_cwd else self.cwd
-		return self._lookup_comps(root, path_components(path), noexc=noexc)
+		return self._lookup_comps(root, path_components(path))
 
 	def lookup_for_edit(self, path: str, should_exist: Optional[bool], override_cwd: Optional[Directory]=None) -> Tuple[Directory, str, Optional[FSObj]]:
 		"""Lookup 'path', returning a 3-tuple of the parent directory, the
@@ -1002,9 +1008,6 @@ class Jemf(object):
 		"""edit an existing file"""
 		editfile = self.lookup_path(args.path)
 
-		# mypy, because we didn't pass noexc=True to self.lookup_path()
-		assert editfile is not None
-
 		if not isfile(editfile):
 			error("'%s' is not a file" % args.path)
 
@@ -1039,8 +1042,10 @@ class Jemf(object):
 		if victim is not None and islink(victim):
 			assert isinstance(victim, Symlink) # mypy
 			assert victim.target is not None # mypy
-			victim = self.lookup_path(victim.target,
-						  noexc=True, override_cwd=newparent)
+			try:
+				victim = self.lookup_path(victim.target, override_cwd=newparent)
+			except PathLookupError:
+				victim = None
 
 		if victim is not None and isdir(victim):
 			assert isinstance(victim, Directory) # mypy
@@ -1117,8 +1122,6 @@ class Jemf(object):
 		"""print a file to stdout"""
 		item = self.lookup_path(args.path)
 
-		assert item is not None # mypy, because no noexc=True in lookup_path()
-
 		if isdir(item):
 			error("'%s' is a directory" % args.path)
 
@@ -1134,9 +1137,7 @@ class Jemf(object):
 		if args.path is None:
 			paths = recursive_list(self.cwd, os.path.curdir, skip_dots=not args.all)
 		else:
-			tmp = self.lookup_path(args.path)
-			assert tmp is not None # mypy, no noexc=True
-			paths = recursive_list(tmp, args.path, skip_dots=not args.all)
+			paths = recursive_list(self.lookup_path(args.path), args.path, skip_dots=not args.all)
 		sys.stdout.write('\n'.join(paths) + '\n')
 
 	@reader([mk_path_arg("file or directory to list (default: .)", opt=True),
@@ -1177,8 +1178,6 @@ class Jemf(object):
 
 				return pfx + main
 			return '\n'.join(fmtitem(i) for i in objs if not isdot(i[0]) or args.all) + '\n'
-
-		assert obj is not None # mypy, because no noexc=True in lookup_path() call
 
 		if isfile(obj) or args.directory:
 			objs = [(path, obj)]
@@ -1231,7 +1230,6 @@ class Jemf(object):
 		if args.path is not None:
 			prefix = args.path
 			top = self.lookup_path(prefix)
-			assert top is not None # mypy, because no noexc=True
 		else:
 			prefix = os.path.curdir
 			top = self.cwd
@@ -1241,7 +1239,6 @@ class Jemf(object):
 			print("(Nothing selected.)", file=sys.stderr)
 			exit(1)
 		item = self.lookup_path(selected)
-		assert item is not None # mypy, because no noexc=True
 		assert isfile(item)
 		assert isinstance(item, File) # mypy
 		assert item.data is not None # mypy
