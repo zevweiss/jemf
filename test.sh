@@ -123,6 +123,16 @@ dlf1="$TEST_OUTPUT"
 runtest "directory link read data" [ "$dlf1" = "$df1" ]
 runtest "rm symlink to directory" jemf rm dl
 
+runtest "create and read through chained symlink" jemf shell <<-EOF
+	ln d/f1 l1
+	ln l1 l2
+	ln l2 l3
+	cat l3
+	rm l1 l2 l3
+EOF
+l3data="$TEST_OUTPUT"
+runtest "chained symlink read data" [ "$l3data" = "$df1" ]
+
 runtest "create broken symlink" jemf ln missing bl
 runtest -n "read from broken symlink" jemf cat bl
 runtest -n "mkdir over broken symlink" jemf mkdir bl
