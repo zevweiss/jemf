@@ -1576,8 +1576,7 @@ def main() -> None:
 				args.fsfile = p
 				break
 
-	# matching by name here is kind of ugly...
-	doing_mkfs = args.action.name == "mkfs"
+	doing_mkfs = args.action is Jemf.mkfs
 
 	# Early check for things that might print secrets to stdout
 	# (to avoid the annoyance of entering your passphrase only to
