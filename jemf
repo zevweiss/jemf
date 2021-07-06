@@ -16,7 +16,7 @@ import json
 import os
 import os.path
 import errno
-import random
+import secrets
 import socket
 import time
 import signal
@@ -309,16 +309,16 @@ def generate_data(constraints: str, punctuation_chars: Optional[str]=None) -> st
 	s, padchars = "", ""
 	for c, chars in classes.items():
 		for _ in range(0, cdict[c]):
-			s += random.choice(chars)
+			s += secrets.choice(chars)
 		if cdict[c] > 0:
 			padchars += chars
 
 	# fill remaining space from pad character sets
 	for _ in range(0, cdict['L']-len(s)):
-		s += random.choice(padchars)
+		s += secrets.choice(padchars)
 
 	l = list(s)
-	random.shuffle(l)
+	secrets.SystemRandom().shuffle(l)
 	return ''.join(l[:cdict['L']])
 
 def isdot(p: str) -> bool:
