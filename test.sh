@@ -4,11 +4,13 @@ set -u
 
 stop_on_fail=false
 keep_tmpfile=false
+do_coverage=false
 
-while getopts sk opt; do
+while getopts skc opt; do
 	case "$opt" in
 	s) stop_on_fail=true;;
 	k) keep_tmpfile=true;;
+	c) do_coverage=true;;
 	*) exit 1;;
 	esac
 done
@@ -21,7 +23,11 @@ else
 	trap "rm -f $fsfile" EXIT
 fi
 
-jemf() { ./jemf "$@"; }
+if $do_coverage; then
+	jemf() { coverage run --append --branch ./jemf "$@"; }
+else
+	jemf() { ./jemf "$@"; }
+fi
 
 export JEMF_FSFILE="$fsfile"
 export __JEMF_TEST__=1
@@ -35,6 +41,12 @@ finish()
 {
 	echo
 	echo "Ran $ntests tests; $npass passed, $nfail failed."
+	if $do_coverage; then
+		echo
+		echo "Coverage Report"
+		echo "==============="
+		coverage report
+	fi
 	[ "$nfail" = 0 ]
 	exit $?
 }
@@ -78,6 +90,10 @@ runtest()
 	fi
 	printf '%s\n' "$result"
 }
+
+if $do_coverage; then
+	coverage erase
+fi
 
 runtest "mkfs" jemf mkfs -f
 runtest "ls fresh FS" jemf ls
