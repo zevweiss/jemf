@@ -1,0 +1,4 @@
+# coverage.py artifacts
+.coverage
+htmlcov/
+*,cover
