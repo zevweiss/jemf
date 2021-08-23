@@ -110,6 +110,8 @@ runtest -n "mkdir when directory exists" jemf mkdir d
 runtest -n "moving a directory into itself" jemf mv d d
 
 runtest "create file" jemf create -g L10 d/f1
+runtest -n "create existing file" jemf create -g L10 d/f1
+runtest -n "cat directory" jemf cat d
 runtest "cat file" jemf cat d/f1
 
 df1="$TEST_OUTPUT"
@@ -133,6 +135,7 @@ runtest "explicit data respected on edit" [ "$TEST_OUTPUT" = "$datastr" ]
 
 runtest -n "create file with both generated and explicit data" jemf create -g L10 -D foo d/x
 runtest -n "edit file with both generated and explicit data" jemf edit -g L10 -D foo d/f1
+runtest -n "edit directory" jemf edit -g L10 d
 
 runtest "data generation with punctuation character constraints" jemf shell -e <<-EOF
 	create -g L6:C0:m0:N0 -P . alldots
@@ -183,6 +186,9 @@ runtest "read from target of unbroken link" jemf cat target
 tgtdata="$TEST_OUTPUT"
 runtest "compare data from link and target" [ "$linkdata" = "$tgtdata" ]
 runtest -n "symlink over existing file" jemf ln foobar target
+
+runtest -n "symlink over existing file in directory target" jemf ln link .
+
 runtest -n "symlink over existing symlink" jemf ln foobar link
 runtest "rm link and target" jemf rm link target
 
@@ -252,7 +258,15 @@ EOF
 ldata="$TEST_OUTPUT"
 runtest "verify symlink data" [ "$ldata" = "$fdata" ]
 
+runtest -n "rename over existing file without -f" jemf shell -e <<-EOF
+	create -g L10 /otherfile
+	mv /otherfile /d1/newfile
+EOF
+
+runtest "rename over existing file with -f" jemf mv -f otherfile d1/newfile
+
 runtest -n "rm non-empty directory" jemf rm d2
 runtest "rm -r on non-empty directory" jemf rm -r d2
+runtest -n "rm root directory" jemf rm /
 
 finish
