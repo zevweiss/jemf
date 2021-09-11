@@ -519,7 +519,11 @@ class JemfShell(CommandInterpreter):
 	def __init__(self, jemf: 'Jemf', args: Args):
 		self.fs = jemf
 		self.args = args
-		self.prompt = ("%sjemf[%s]> %s" % (ansi_red, self.fs.filename, ansi_rst)) if sys.stdin.isatty() else ""
+		if sys.stdin.isatty():
+			ro = "[ro]" if self.fs.read_only else ""
+			self.prompt = "%sjemf[%s]%s> %s" % (ansi_red, self.fs.filename, ro, ansi_rst)
+		else:
+			self.prompt = ""
 		tmout = os.getenv("JEMF_TMOUT")
 		if tmout:
 			try:
@@ -654,13 +658,14 @@ class JemfCommand(object):
 	_all_commands: List['JemfCommand'] = []
 
 	def __init__(self, cmdfn: JemfCommandFn, cmd_args: Optional[JemfCommandArgs]=None,
-		     parser_kwargs: Optional[Dict[str, Any]]=None,
+		     parser_kwargs: Optional[Dict[str, Any]]=None, read_only: bool=False,
 		     shell_only: bool=False, batch_only: bool=False) -> None:
 		self.name = cmdfn.__name__
 		self.desc = cmdfn.__doc__
 		self.cmdfn = cmdfn
 		self.cmd_args = cmd_args if cmd_args is not None else []
 		self.parser_kwargs = parser_kwargs if parser_kwargs is not None else {}
+		self.read_only = read_only
 		self.shell_only = shell_only
 		self.batch_only = batch_only
 		JemfCommand._all_commands.append(self)
@@ -691,16 +696,19 @@ class JemfCommand(object):
 		def wr_dec(fn: JemfCommandFn) -> JemfCommand:
 			@functools.wraps(fn)
 			def new_fn(self: 'Jemf', args: Args) -> None:
+				# attempts to execute @writer commands should be
+				# caught and rejected well before reaching this point
+				assert not self.read_only, "@writer command executed on read-only FS"
 				fn(self, args)
 				self._write_out()
-			return JemfCommand(new_fn, cmd_args=cmd_args, **kwargs)
+			return JemfCommand(new_fn, cmd_args=cmd_args, read_only=False, **kwargs)
 		return wr_dec
 
 	# decorator for read-only commands
 	@staticmethod
 	def reader(cmd_args: JemfCommandArgs, **kwargs: Any) -> JemfCommandDecorator:
 		def rd_dec(fn: JemfCommandFn) -> JemfCommand:
-			return JemfCommand(fn, cmd_args=cmd_args, **kwargs)
+			return JemfCommand(fn, cmd_args=cmd_args, read_only=True, **kwargs)
 		return rd_dec
 
 SOCKBUF_SIZE = 1024
@@ -710,9 +718,10 @@ class Jemf(object):
 	writer = JemfCommand.writer
 	commands = JemfCommand._all_commands
 
-	def __init__(self, filename: str, password: Optional[str]) -> None:
+	def __init__(self, filename: str, password: Optional[str], read_only: bool) -> None:
 		self.filename = filename
 		self.password = password
+		self.read_only = read_only
 		self.pipe_to: Optional[str] = None
 		self.data = Directory(None)
 		self.metadata: Dict[str, Any] = {}
@@ -748,8 +757,8 @@ class Jemf(object):
 		self.cwd = self.data
 
 	@classmethod
-	def load_from_path(cls, filename: str, password: str) -> 'Jemf':
-		fs = cls(filename, password)
+	def load_from_path(cls, filename: str, password: str, read_only: bool) -> 'Jemf':
+		fs = cls(filename, password, read_only)
 		s = gpg_decrypt(filename, password)
 		try:
 			fs._from_json(s.decode("utf-8"))
@@ -778,8 +787,8 @@ class Jemf(object):
 		return (status, data)
 
 	@classmethod
-	def from_server(cls, socket: socket.socket, filename: str) -> 'Jemf':
-		fs = cls(filename, None)
+	def from_server(cls, socket: socket.socket, filename: str, read_only: bool) -> 'Jemf':
+		fs = cls(filename, None, read_only)
 		fs.socket = socket
 		fs.socket.sendall(b"%s %s\n" % (READ_REQ, base64.b64encode(filename.encode("utf-8"))))
 		ok, data = fs.recv_response()
@@ -1232,7 +1241,7 @@ class Jemf(object):
 		self.shell_mode = True
 
 		for cmd in self.commands:
-			if cmd.batch_only:
+			if cmd.batch_only or (self.read_only and not cmd.read_only):
 				continue
 
 			# get the "jemf" prefix out of the help message
@@ -1325,7 +1334,7 @@ def open_jemf_fs(args: Args, skip_locking: bool=False) -> Jemf:
 	sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
 	try:
 		sock.connect(get_sockpath(args.fsfile))
-		return Jemf.from_server(sock, args.fsfile)
+		return Jemf.from_server(sock, args.fsfile, args.read_only)
 	except ProtocolError:
 		raise
 	except:
@@ -1334,7 +1343,7 @@ def open_jemf_fs(args: Args, skip_locking: bool=False) -> Jemf:
 	if not os.path.exists(args.fsfile):
 		error("'%s' does not exist" % args.fsfile)
 	password = getpass("Enter password for %s: " % args.fsfile)
-	return Jemf.load_from_path(args.fsfile, password)
+	return Jemf.load_from_path(args.fsfile, password, args.read_only)
 
 def new_jemf_fs(args: Args, skip_locking: bool=False) -> Jemf:
 	if os.path.exists(args.fsfile) and not args.force:
@@ -1350,7 +1359,7 @@ def new_jemf_fs(args: Args, skip_locking: bool=False) -> Jemf:
 		if password == "":
 			errprint("Empty password not allowed.")
 
-	return Jemf(args.fsfile, password)
+	return Jemf(args.fsfile, password, args.read_only)
 
 def get_sockdir() -> str:
 	uid = os.getuid()
@@ -1417,6 +1426,8 @@ def serve_request(line: bytes, fs: Jemf, client: socket.socket) -> None:
 	elif req == WRITE_REQ:
 		if len(fields) != 3:
 			resp = err_resp("wrong number of arguments to WRITE")
+		elif fs.read_only:
+			resp = err_resp("server in read-only mode")
 		else:
 			path, data = [base64.b64decode(s).decode("utf-8") for s in fields[1:]]
 			if path == fs.filename:
@@ -1555,6 +1566,8 @@ def main() -> None:
 					     " variable JEMF_FSFILE")
 
 	mainparser.add_argument("-f", "--fsfile", type=str, help="jemf FS file to use")
+	mainparser.add_argument("-r", "--read-only", action="store_true",
+				help="prohibit modifications")
 	mainparser.add_argument("-X", "--gui", action="store_true",
 				help="Use GUI sub-programs for password input and status output"
 				     " ([gnome-]ssh-askpass and zenity/[g]xmessage)")
@@ -1587,6 +1600,9 @@ def main() -> None:
 			if p is not None:
 				args.fsfile = p
 				break
+
+	if args.read_only and not args.action.read_only:
+		error("%s cannot be performed in read-only mode" % args.action.name)
 
 	doing_mkfs = args.action is Jemf.mkfs
 
