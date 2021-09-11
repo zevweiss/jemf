@@ -46,8 +46,6 @@ except ImportError:
 default_fspaths = [os.path.expanduser(p) for p in ["~/.config/jemf", "~/.jemf"]]
 gpgcmd = "gpg2"
 
-debugmode = os.getenv("JEMF_DEBUG") is not None
-
 CURRENT_FORMAT_VERSION = 3
 
 # python3's os.pipe() sets O_CLOEXEC, which we don't want
@@ -1181,22 +1179,6 @@ class Jemf(object):
 		else:
 			objs = sorted(obj.items())
 		sys.stdout.write(lsfmt(objs))
-
-	if debugmode:
-		@reader([(("-m", "--metadata"), dict(action="store_const", dest="kind",
-						     const="metadata", help="dump only metadata")),
-			 (("-d", "--data"), dict(action="store_const", dest="kind",
-						 const="data", help="dump only data")),
-			 force_print_arg])
-		def dump(self, args: Args) -> None:
-			"""dump plaintext JSON"""
-			if args.kind == "data":
-				s = pretty_json_dump(self.data)
-			elif args.kind == "metadata":
-				s = pretty_json_dump(self.metadata)
-			else:
-				s = self._to_json()
-			self.output_secret(s, args.force)
 
 	def _menu_select(self, items: List[str]) -> Optional[str]:
 		argv = ["dmenu", "-i", "-b", "-l", "20", "-p", self.filename,
