@@ -519,11 +519,7 @@ class JemfShell(CommandInterpreter):
 	def __init__(self, jemf: 'Jemf', args: Args):
 		self.fs = jemf
 		self.args = args
-		if sys.stdin.isatty():
-			ro = "[ro]" if self.fs.read_only else ""
-			self.prompt = "%sjemf[%s]%s> %s" % (ansi_red, self.fs.filename, ro, ansi_rst)
-		else:
-			self.prompt = ""
+		self.setprompt()
 		tmout = os.getenv("JEMF_TMOUT")
 		if tmout:
 			try:
@@ -532,6 +528,14 @@ class JemfShell(CommandInterpreter):
 				errprint("JEMF_TMOUT value not a valid base-10 integer, retaining default (%d)"
 					 % self.input_timeout)
 		CommandInterpreter.__init__(self)
+
+	def setprompt(self) -> None:
+		if sys.stdin.isatty():
+			ro = "[ro]" if self.fs.read_only else ""
+			cwd = Jemf.get_dirname(self.fs.cwd)
+			self.prompt = "%sjemf[%s:%s]%s> %s" % (ansi_red, self.fs.filename, cwd, ro, ansi_rst)
+		else:
+			self.prompt = ""
 
 	def do_EOF(self, args: List[str]) -> bool:
 		"""EOF (^D): exit shell session."""
@@ -554,6 +558,7 @@ class JemfShell(CommandInterpreter):
 
 	def postcmd(self, stop: bool, line: str) -> bool:
 		if not stop:
+			self.setprompt()
 			self.set_input_timeout_alarm()
 		return stop
 
@@ -894,6 +899,19 @@ class Jemf(object):
 
 		return (parent, tgtcomp, existing)
 
+	# dumb brute force...could introduce some extra machinery to make this
+	# more efficient, but it's probably good enough.
+	@staticmethod
+	def get_dirname(obj: Directory) -> str:
+		parent = obj[os.path.pardir]
+		assert isinstance(parent, Directory)
+		if parent is obj:
+			return os.sep
+		for k, v in parent.items():
+			if v is obj:
+				return os.path.join(Jemf.get_dirname(parent), k)
+		return '???'
+
 	# some common flags
 	generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
 						   help="auto-generate entry data"))
@@ -945,18 +963,7 @@ class Jemf(object):
 	@reader([], shell_only=True)
 	def pwd(self, args: Args) -> None:
 		"""print working directory"""
-		# dumb brute force...could introduce some extra
-		# machinery to make this more efficient.
-		def get_dirname(obj: Directory) -> str:
-			parent = obj[os.path.pardir]
-			assert isinstance(parent, Directory)
-			if parent is obj:
-				return os.sep
-			for k, v in parent.items():
-				if v is obj:
-					return os.path.join(get_dirname(parent), k)
-			return '???'
-		print(get_dirname(self.cwd))
+		print(Jemf.get_dirname(self.cwd))
 
 	@writer([mk_path_arg("the directory to create")])
 	def mkdir(self, args: Args) -> None:
