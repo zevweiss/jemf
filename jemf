@@ -563,7 +563,11 @@ class JemfShell(CommandInterpreter):
 		return False
 
 	def default(self, line: str) -> bool:
-		errprint("Unrecognized command: %s\n(see 'help')" % line.split()[0])
+		errmsg = "Unrecognized command: %s" % shlex.split(line)[0]
+		if self.args.exit_on_failure:
+			raise UserError(errmsg)
+		else:
+			errprint("%s\n(see 'help')" % errmsg)
 		return False
 
 	def completedefault(self, orig_text: str, line: str, beg: int, end: int) -> List[str]: # type: ignore[override]
