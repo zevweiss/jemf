@@ -275,4 +275,13 @@ runtest -n "rm non-empty directory" jemf rm d2
 runtest "rm -r on non-empty directory" jemf rm -r d2
 runtest -n "rm root directory" jemf rm /
 
+runtest "cross-directory directory rename" jemf shell -e <<-EOF
+	mkdir a
+	mkdir b
+	mv b a
+	cd a/b
+	pwd
+EOF
+runtest "parent update on cross-directory directory rename" [ "$TEST_OUTPUT" = "/a/b" ]
+
 finish

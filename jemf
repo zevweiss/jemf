@@ -466,6 +466,9 @@ class Directory(FSObj):
 		self.touch()
 		self.dentries.__delitem__(k)
 
+	def set_parent(self, p: 'Directory') -> None:
+		self._specials[os.path.pardir] = p
+
 	def items(self) -> ItemsView[str, FSObj]:
 		return self.dentries.items()
 
@@ -1082,6 +1085,8 @@ class Jemf(object):
 				error("'%s' is not empty" % topath)
 
 		newparent[newobjname] = obj
+		if isinstance(obj, Directory):
+			obj.set_parent(newparent)
 		del curparent[objname]
 
 	@writer([(("target",), dict(help="link target")),
