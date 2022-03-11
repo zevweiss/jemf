@@ -31,6 +31,7 @@ import hashlib
 import atexit
 import re
 import struct
+import traceback
 
 from typing import NoReturn, Any, Optional, List, Dict, Tuple, Callable, Union
 from typing import Text, Sequence, ItemsView, cast
@@ -123,6 +124,10 @@ def getpass_tty(prompt: str) -> str:
 
 getpass_interactive = getpass_tty
 errprint = errprint_tty
+
+def report_internal_error(err: InternalError) -> None:
+	errprint("Internal error!  Please report a bug with the following stack trace:")
+	errprint(''.join(traceback.format_exception(err))) # type: ignore[arg-type]
 
 def confirm_gui(prompt: str) -> bool:
 	xmsg_flags = ["-buttons", "No:1,Yes:0", "-default", "Yes"]
@@ -619,11 +624,14 @@ class JemfShell(CommandInterpreter):
 					setattr(args, k, v)
 			try:
 				cmd(self.fs, args)
-			except UserError as ue:
+			except (InternalError, UserError) as err:
 				if self.args.exit_on_failure:
 					raise
-				if ue.args[0]:
-					errprint(ue.args[0])
+				if isinstance(err, UserError):
+					if err.args[0]:
+						errprint(err.args[0])
+				elif isinstance(err, InternalError):
+					report_internal_error(err)
 		cmdfun.__doc__ = cmd.parser.format_help()
 		setattr(cls, "do_%s" % cmd.name, cmdfun)
 
@@ -1635,4 +1643,7 @@ if __name__ == "__main__":
 	except (UserError, ProtocolError) as ex:
 		if ex.args[0]:
 			errprint(ex.args[0])
+		exit(1)
+	except InternalError as ex:
+		report_internal_error(ex)
 		exit(1)
