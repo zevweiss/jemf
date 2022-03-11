@@ -537,7 +537,11 @@ class JemfShell(CommandInterpreter):
 	def setprompt(self) -> None:
 		if sys.stdin.isatty():
 			ro = "[ro]" if self.fs.read_only else ""
-			cwd = Jemf.get_dirname(self.fs.cwd)
+			try:
+				cwd = Jemf.get_dirname(self.fs.cwd)
+			except InternalError as ex:
+				report_internal_error(ex)
+				cwd = '???'
 			self.prompt = "%sjemf[%s:%s]%s> %s" % (ansi_red, self.fs.filename, cwd, ro, ansi_rst)
 		else:
 			self.prompt = ""
@@ -918,7 +922,7 @@ class Jemf(object):
 		for k, v in parent.items():
 			if v is obj:
 				return os.path.join(Jemf.get_dirname(parent), k)
-		return '???'
+		internal_error("unable to determine directory path")
 
 	# some common flags
 	generate_arg = (("-g", "--generate"), dict(metavar="CONSTRAINTS", type=str,
