@@ -1080,7 +1080,7 @@ class Jemf(object):
 		if newobjname in newparent:
 			existing = newparent[newobjname]
 			if not args.force:
-				error("'%s' exists (user '-f' to overwrite)" % topath)
+				error("'%s' exists (use '-f' to overwrite)" % topath)
 			elif is_nonempty_dir(existing):
 				error("'%s' is not empty" % topath)
 
