@@ -127,7 +127,7 @@ errprint = errprint_tty
 
 def report_internal_error(err: InternalError) -> None:
 	errprint("Internal error!  Please report a bug with the following stack trace:")
-	errprint(''.join(traceback.format_exception(err))) # type: ignore[arg-type]
+	errprint(''.join(traceback.format_exception(err)))
 
 def confirm_gui(prompt: str) -> bool:
 	xmsg_flags = ["-buttons", "No:1,Yes:0", "-default", "Yes"]
