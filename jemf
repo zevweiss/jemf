@@ -1157,6 +1157,7 @@ class Jemf(object):
 	@reader([mk_path_arg("file or directory to list (default: .)", opt=True),
 		 (("-a", "--all"), dict(help="don't skip entries starting with '.'", action="store_true")),
 		 (("-l", "--long"), dict(help="use long format", action="store_true")),
+		 (("-r", "--reverse"), dict(help="reverse sort order", action="store_true")),
 		 (("-t", "--time-sort"), dict(help="sort by modification time", action="store_true")),
 		 (("-d", "--directory"), dict(help="list directories themselves, not their contents",
 					      action="store_true"))])
@@ -1197,7 +1198,7 @@ class Jemf(object):
 			objs = [(path, cast(FSObj, obj))]
 		else:
 			sortkey = (lambda t: t[1].mtime) if args.time_sort else (lambda n: n)
-			objs = sorted(obj.items(), key=sortkey)
+			objs = sorted(obj.items(), key=sortkey, reverse=args.reverse)
 		sys.stdout.write(lsfmt(objs))
 
 	def _menu_select(self, items: List[str]) -> Optional[str]:
