@@ -327,14 +327,14 @@ def generate_data(constraints: str, punctuation_chars: Optional[str]=None) -> st
 def isdot(p: str) -> bool:
 	return p.startswith('.') and p not in [".", ".."]
 
-def recursive_list(obj: 'FSObj', pfx: str, fileonly: bool=False, skip_dots: bool=True) -> List[str]:
+def recursive_list(obj: 'FSObj', pfx: str, nodirs: bool=False, skip_dots: bool=True) -> List[str]:
 	l = []
 	skip = skip_dots and isdot(os.path.basename(pfx))
-	if (not fileonly or isinstance(obj, File)) and not skip:
+	if (not nodirs or not isinstance(obj, Directory)) and not skip:
 		l.append(pfx)
 	if isinstance(obj, Directory) and not skip:
 		for n, o in obj.items():
-			l += recursive_list(o, os.path.join(pfx, n), fileonly=fileonly,
+			l += recursive_list(o, os.path.join(pfx, n), nodirs=nodirs,
 					    skip_dots=skip_dots)
 	return l
 
@@ -1232,7 +1232,7 @@ class Jemf(object):
 		else:
 			prefix = os.path.curdir
 			top = self.cwd
-		paths = recursive_list(top, prefix, fileonly=True, skip_dots=not args.all)
+		paths = recursive_list(top, prefix, nodirs=True, skip_dots=not args.all)
 		selected = self._menu_select(sorted(paths))
 		if selected is None:
 			print("(Nothing selected.)", file=sys.stderr)
