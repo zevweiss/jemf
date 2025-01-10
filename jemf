@@ -586,7 +586,7 @@ class JemfShell(CommandInterpreter):
 		else:
 			errprint("%s\n(see 'help')" % errmsg)
 
-	def completedefault(self, orig_text: str, line: str, beg: int, end: int) -> List[str]: # type: ignore[override]
+	def completedefault(self, orig_text: str, line: str, beg: int, end: int) -> List[str]:
 		try:
 			if shlex.split(line[:end] + ".")[-1] != ".":
 				text = shlex.split(line[:end])[-1]
